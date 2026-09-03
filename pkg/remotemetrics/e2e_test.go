@@ -82,9 +82,9 @@ func TestProofWindowCarriesRealGPUWork(t *testing.T) {
 	input := "0x" + hex.EncodeToString(raw)
 
 	scraper := NewScraper([]Endpoint{{
-		Name:   "local",
-		URL:    sidecarURL,
-		Labels: map[string]string{"node": "local"},
+		Exporter: ExporterDCGM,
+		URL:      sidecarURL,
+		Labels:   map[string]string{"node": "local"},
 	}}, 100*time.Millisecond, 2*time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -121,15 +121,14 @@ func TestProofWindowCarriesRealGPUWork(t *testing.T) {
 	elapsed := window.Metrics["DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL"].Total
 	active := window.Metrics["DCGM_FI_PROF_SM_CYCLES_ACTIVE_TOTAL"].Total
 	integer := window.Metrics["DCGM_FI_PROF_INT_CYCLES_ACTIVE_TOTAL"].Total
-	energy := window.Metrics["DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION"].Total
+	power := window.Metrics["DCGM_FI_DEV_POWER_USAGE"].Mean
 
 	t.Logf("device %s", window.Device)
 	t.Logf("  scrapes=%d updates=%d over %s",
 		window.Scrapes, window.Updates, end.Sub(start).Round(time.Millisecond))
 	t.Logf("  smActive=%.4f intActive=%.4f",
 		active/elapsed, integer/elapsed)
-	t.Logf("  energy=%.1fJ meanPower=%.1fW",
-		energy/1000, energy/1000/end.Sub(start).Seconds())
+	t.Logf("  meanPower=%.1fW", power)
 	t.Logf("  dramActive mean=%.4f max=%.4f",
 		window.Metrics["DCGM_FI_PROF_DRAM_ACTIVE"].Mean,
 		window.Metrics["DCGM_FI_PROF_DRAM_ACTIVE"].Max)
@@ -141,7 +140,7 @@ func TestProofWindowCarriesRealGPUWork(t *testing.T) {
 
 	require.Positive(t, elapsed, "no SM cycles elapsed during the proof")
 	require.Positive(t, active, "the GPU did no work during the proof")
-	require.Positive(t, energy, "the GPU consumed no energy during the proof")
+	require.Positive(t, power, "the GPU drew no power during the proof")
 	require.Positive(t, window.Updates, "the source never refreshed during the proof")
 
 	// A STARK prover over a Goldilocks field runs on the integer pipe, so a
@@ -158,10 +157,11 @@ func TestProofWindowCarriesRealGPUWork(t *testing.T) {
 
 	// The artifact is what a run actually stores, so read it back rather than
 	// trusting the in-memory collector.
-	path := filepath.Join(t.TempDir(), ArtifactName)
-	require.NoError(t, collector.Write(path))
+	dir := t.TempDir()
+	_, err = collector.Write(dir)
+	require.NoError(t, err)
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Join(dir, ArtifactNames[ExporterDCGM]))
 	require.NoError(t, err)
 
 	var artifact Artifact
@@ -179,7 +179,8 @@ func TestProofWindowCarriesRealGPUWork(t *testing.T) {
 
 	row := artifact.Tests["e2e.json"]["0xe2e"][0]
 	require.Len(t, row, len(artifact.Columns))
-	require.Positive(t, row[column], "the stored artifact lost the work the window measured")
+	require.NotNil(t, row[column], "the stored artifact lost the work the window measured")
+	require.Positive(t, *row[column], "the stored artifact lost the work the window measured")
 
 	// Size drives the publish constraint. The column and device tables are
 	// written once, so the row is the only part that scales with a run.
@@ -196,6 +197,6 @@ func TestProofWindowCarriesRealGPUWork(t *testing.T) {
 	// No hostname may reach a published result.
 	require.NotContains(t, string(data), "hostname")
 
-	fmt.Fprintf(os.Stderr, "e2e window: smActive=%.4f intActive=%.4f energy=%.1fJ rate=%.2fHz artifact=%dB\n",
-		active/elapsed, integer/elapsed, energy/1000, rate, len(data))
+	fmt.Fprintf(os.Stderr, "e2e window: smActive=%.4f intActive=%.4f power=%.1fW rate=%.2fHz artifact=%dB\n",
+		active/elapsed, integer/elapsed, power, rate, len(data))
 }

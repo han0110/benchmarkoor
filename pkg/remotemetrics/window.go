@@ -6,13 +6,17 @@ import (
 	"time"
 )
 
-// Stat is one metric reduced over one window. A counter reports Total and a
-// gauge reports Mean, Min and Max.
+// Stat is one metric reduced over one window. A counter reports Total and
+// PeakRate, and a gauge reports Mean, Min and Max.
 type Stat struct {
 	Total float64 `json:"total,omitempty"`
 	Mean  float64 `json:"mean,omitempty"`
 	Min   float64 `json:"min,omitempty"`
 	Max   float64 `json:"max,omitempty"`
+	// PeakRate is the fastest a counter advanced between two source
+	// refreshes, per second. A total spread over the whole window reports an
+	// average, and an average hides the burst that saturates a link or a bus.
+	PeakRate float64 `json:"peakRate,omitempty"`
 }
 
 // DeviceWindow holds every metric of one device over one window.
@@ -23,11 +27,12 @@ type Stat struct {
 // than the rate this package polled at. The two differ whenever the source
 // slows down, and only Updates reveals it.
 type DeviceWindow struct {
-	Device  string            `json:"device"`
-	Labels  map[string]string `json:"labels"`
-	Scrapes int               `json:"scrapes"`
-	Updates int               `json:"updates"`
-	Metrics map[string]Stat   `json:"metrics"`
+	Device   string            `json:"device"`
+	Exporter string            `json:"exporter"`
+	Labels   map[string]string `json:"labels"`
+	Scrapes  int               `json:"scrapes"`
+	Updates  int               `json:"updates"`
+	Metrics  map[string]Stat   `json:"metrics"`
 }
 
 // Reduce cuts every device's samples to the window and reduces them.
@@ -65,11 +70,12 @@ func (s *Scraper) Reduce(start, end time.Time) []DeviceWindow {
 	windows := make([]DeviceWindow, 0, len(devices))
 	for _, device := range devices {
 		windows = append(windows, DeviceWindow{
-			Device:  device,
-			Labels:  s.devices[device],
-			Scrapes: scrapes[device],
-			Updates: updates[device],
-			Metrics: byDevice[device],
+			Device:   device,
+			Exporter: s.exporters[device],
+			Labels:   s.devices[device],
+			Scrapes:  scrapes[device],
+			Updates:  updates[device],
+			Metrics:  byDevice[device],
 		})
 	}
 	return windows
@@ -96,7 +102,7 @@ func reduce(points []point, kind Kind, start, end time.Time, interval time.Durat
 			return Stat{}, 0, 0, false
 		}
 		count, changes := activity(bracket, start, end)
-		return Stat{Total: total}, count, changes, true
+		return Stat{Total: total, PeakRate: peakRate(bracket)}, count, changes, true
 	}
 	stat, count, ok := gaugeStat(bracket, start, end)
 	if !ok {
@@ -183,6 +189,47 @@ func counterTotal(points []point, start, end time.Time) (float64, bool) {
 		return 0, false
 	}
 	return last - first, true
+}
+
+// peakRate reports the fastest the counter advanced between two source
+// refreshes, in units per second.
+//
+// A reading equal to the one before it counts as a scrape the source had not
+// refreshed for, so rates run between changed readings. Dividing by the scrape
+// interval would multiply the rate of a slow source by the scrapes each
+// refresh spanned. The first change only marks a refresh instant, because the
+// refresh before it lies outside the bracket. With one change the mean rate
+// over the bracket stands in. A counter idle for several refreshes and then
+// bursting reports the burst spread over the idle span, which is the
+// accepted cost.
+func peakRate(points []point) float64 {
+	var peak float64
+	var refresh *point
+	var changes int
+
+	for i := 1; i < len(points); i++ {
+		if points[i].value == points[i-1].value {
+			continue
+		}
+
+		changes++
+
+		if refresh != nil {
+			if span := points[i].at.Sub(refresh.at).Seconds(); span > 0 {
+				peak = math.Max(peak, (points[i].value-refresh.value)/span)
+			}
+		}
+
+		refresh = &points[i]
+	}
+
+	if changes == 1 {
+		if span := points[len(points)-1].at.Sub(points[0].at).Seconds(); span > 0 {
+			peak = (points[len(points)-1].value - points[0].value) / span
+		}
+	}
+
+	return peak
 }
 
 // interpolate reads the counter at an instant between two readings.

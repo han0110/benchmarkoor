@@ -14,6 +14,8 @@ import { MetadataLabels } from '@/components/run-detail/MetadataLabels'
 import { GitHubSection } from '@/components/run-detail/GitHubSection'
 import { FilesPanel } from '@/components/run-detail/FilesPanel'
 import { ResourceUsageCharts } from '@/components/run-detail/ResourceUsageCharts'
+import { GpuMetricsCharts } from '@/components/run-detail/GpuMetricsCharts'
+import { NodeMetricsCharts } from '@/components/run-detail/NodeMetricsCharts'
 import { TestsTable, type TestSortColumn, type TestSortDirection, type TestStatusFilter } from '@/components/run-detail/TestsTable'
 import { PreRunStepsTable } from '@/components/run-detail/PreRunStepsTable'
 import { TestHeatmap, type SortMode, type GroupMode } from '@/components/run-detail/TestHeatmap'
@@ -39,6 +41,7 @@ import { ClientRunsStrip } from '@/components/run-detail/ClientRunsStrip'
 import { BlockLogsDashboard } from '@/components/run-detail/block-logs-dashboard'
 import { isProvingRun } from '@/utils/blockLogs'
 import { useBlockLogs } from '@/api/hooks/useBlockLogs'
+import { useDeviceMetrics, useNodeMetrics } from '@/api/hooks/useRemoteMetrics'
 import { Flame, Download, SquareStack, GitCompareArrows, Trash2 } from 'lucide-react'
 import { MAX_COMPARE_RUNS, MIN_COMPARE_RUNS } from '@/components/compare/constants'
 import { useAuth } from '@/hooks/useAuth'
@@ -187,6 +190,8 @@ export function RunDetailPage() {
     enabled: !!runId,
   })
   const { data: blockLogs } = useBlockLogs(runId)
+  const { data: deviceMetrics } = useDeviceMetrics(runId)
+  const { data: nodeMetrics } = useNodeMetrics(runId)
   const { data: stateActorManifest } = useStateActorManifest(runId, fetchOnDisk)
 
   const isLoading = liveRunsLoading || configLoading || resultLoading
@@ -940,6 +945,28 @@ export function RunDetailPage() {
             onStatusFilterChange={handleStatusFilterChange}
             onTestClick={handleTestModalChange}
           />
+
+          {deviceMetrics && (
+            <GpuMetricsCharts
+              metrics={deviceMetrics}
+              suiteTests={mergedSuiteTests ?? suite?.tests}
+              searchQuery={q}
+              tests={result.tests}
+              statusFilter={status}
+              onTestClick={handleTestModalChange}
+            />
+          )}
+
+          {nodeMetrics && (
+            <NodeMetricsCharts
+              metrics={nodeMetrics}
+              suiteTests={mergedSuiteTests ?? suite?.tests}
+              searchQuery={q}
+              tests={result.tests}
+              statusFilter={status}
+              onTestClick={handleTestModalChange}
+            />
+          )}
         </>
       )}
 

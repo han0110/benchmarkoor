@@ -1,10 +1,9 @@
 // Package remotemetrics scrapes Prometheus text endpoints on remote hosts and
 // reduces the samples into per-test windows.
 //
-// The package holds no knowledge of any particular exporter. It learns which
-// series are counters and which are gauges from the TYPE lines of the
-// exposition, so a GPU exporter and a stock node exporter both work with no
-// code change.
+// The package learns which series are counters and which are gauges from the
+// TYPE lines of the exposition. It records only the series the artifacts
+// carry, which the preset of each exporter selects.
 package remotemetrics
 
 import (
@@ -46,13 +45,15 @@ const (
 
 // Endpoint is one remote exposition to scrape.
 type Endpoint struct {
-	// Name identifies the endpoint in the results. It never carries a
-	// hostname, because results are published.
-	Name string
+	// Exporter names the kind of endpoint, which selects the series recorded
+	// from it and the artifact its devices land in.
+	Exporter string
 	// URL is the exposition to fetch.
 	URL string
-	// Labels are attached to every series the endpoint reports, which is how
-	// a node identity reaches the results without the exporter knowing it.
+	// Labels identify the node and are attached to every series the endpoint
+	// reports, which is how a node identity reaches the results without the
+	// exporter knowing it. They never carry a hostname, because results are
+	// published.
 	Labels map[string]string
 }
 
@@ -76,11 +77,12 @@ type Scraper struct {
 	interval  time.Duration
 	client    *http.Client
 
-	mu      sync.Mutex
-	kinds   map[string]Kind
-	points  map[series][]point
-	devices map[string]map[string]string
-	failed  int
+	mu        sync.Mutex
+	kinds     map[string]Kind
+	points    map[series][]point
+	devices   map[string]map[string]string
+	exporters map[string]string
+	failed    map[string]Failure
 }
 
 // NewScraper builds a scraper over the given endpoints.
@@ -92,6 +94,8 @@ func NewScraper(endpoints []Endpoint, interval, timeout time.Duration) *Scraper 
 		kinds:     map[string]Kind{},
 		points:    map[series][]point{},
 		devices:   map[string]map[string]string{},
+		exporters: map[string]string{},
+		failed:    map[string]Failure{},
 	}
 }
 
@@ -146,25 +150,41 @@ func (s *Scraper) poll(ctx context.Context, endpoint Endpoint) {
 		case <-ticker.C:
 			if err := s.scrape(ctx, endpoint); err != nil {
 				s.mu.Lock()
-				s.failed++
+				s.failed[endpoint.URL] = Failure{Count: s.failed[endpoint.URL].Count + 1, Last: err}
 				s.mu.Unlock()
 			}
 		}
 	}
 }
 
-// hasDataPast reports whether any reading arrived after an instant. A window
-// that still cannot be reduced once this is true will never reduce, so a
-// caller stops waiting for it.
-func (s *Scraper) hasDataPast(at time.Time) bool {
+// settled reports whether every series has a reading at or after an instant.
+//
+// Endpoints answer at different speeds, and a window is only complete once the
+// slowest of them has caught up. Accepting the first endpoint to arrive would
+// drop the slower one's devices from that block without a word.
+func (s *Scraper) settled(at time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if len(s.points) == 0 {
+		return false
+	}
+
+	// This check mirrors covers, which needs a reading at or after the
+	// window end to interpolate the closing edge from.
 	for _, points := range s.points {
-		if len(points) > 0 && points[len(points)-1].at.After(at) {
-			return true
+		if len(points) == 0 || points[len(points)-1].at.Before(at) {
+			return false
 		}
 	}
-	return false
+
+	return true
+}
+
+// readinessGrace bounds the wait for an endpoint that has not caught up, so
+// one that stopped answering costs its own rows rather than every block.
+func (s *Scraper) readinessGrace() time.Duration {
+	return s.interval * staleReadingFactor
 }
 
 // kindOf reports how a metric reduces, which the exposition declared.
@@ -174,15 +194,28 @@ func (s *Scraper) kindOf(metric string) Kind {
 	return s.kinds[metric]
 }
 
-// Failures reports how many scrapes failed, so a caller can warn once rather
-// than per scrape.
-func (s *Scraper) Failures() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.failed
+// Failure counts the scrapes of one endpoint that failed and keeps the last
+// error, which is what names the endpoint at fault when an artifact is missing.
+type Failure struct {
+	Count int
+	Last  error
 }
 
-// scrape fetches one endpoint and records every sample it carries.
+// Failures reports the failed scrapes by endpoint URL, so a caller can warn
+// once per endpoint rather than per scrape.
+func (s *Scraper) Failures() map[string]Failure {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	failures := make(map[string]Failure, len(s.failed))
+	for url, failure := range s.failed {
+		failures[url] = failure
+	}
+	return failures
+}
+
+// scrape fetches one endpoint and records every sample it carries. An
+// exposition without any series of the exporter is a failure, because a port
+// that answers with the wrong service is otherwise invisible.
 func (s *Scraper) scrape(ctx context.Context, endpoint Endpoint) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.URL, nil)
 	if err != nil {
@@ -207,27 +240,67 @@ func (s *Scraper) scrape(ctx context.Context, endpoint Endpoint) error {
 	// series of one scrape shares a single consistent stamp.
 	at := time.Now()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// A preset that sums over a label maps many samples onto one series, so
+	// the scrape is totalled before any of it reaches the buffer. One reading
+	// per series per scrape is what the window reduction expects.
+	rules := presets[endpoint.Exporter]
+	totals := map[series]float64{}
+	identities := map[string]map[string]string{}
+
 	for name, family := range families {
+		selections := rules.series[name]
+		if len(selections) == 0 {
+			continue
+		}
+
 		kind := KindGauge
 		if family.GetType() == dto.MetricType_COUNTER {
 			kind = KindCounter
 		}
-		s.kinds[name] = kind
+
+		s.mu.Lock()
+		for _, sel := range selections {
+			s.kinds[sel.name] = kind
+		}
+		s.mu.Unlock()
+
 		for _, metric := range family.GetMetric() {
 			value, ok := sampleValue(metric, family.GetType())
 			if !ok {
 				continue
 			}
-			device := deviceKey(endpoint, metric)
-			if _, seen := s.devices[device]; !seen {
-				s.devices[device] = deviceLabels(endpoint, metric)
+
+			device := deviceKey(endpoint, metric, rules)
+			if _, seen := identities[device]; !seen {
+				identities[device] = deviceLabels(endpoint, metric, rules)
 			}
-			key := series{metric: name, device: device}
-			s.points[key] = append(s.points[key], point{at: at, value: value})
+
+			for _, sel := range selections {
+				if sel.matches(metric) {
+					totals[series{metric: sel.name, device: device}] += value
+				}
+			}
 		}
 	}
+
+	if len(totals) == 0 {
+		return fmt.Errorf("%s serves none of the %s series", endpoint.URL, endpoint.Exporter)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for device, labels := range identities {
+		if _, seen := s.devices[device]; !seen {
+			s.devices[device] = labels
+			s.exporters[device] = endpoint.Exporter
+		}
+	}
+
+	for key, value := range totals {
+		s.points[key] = append(s.points[key], point{at: at, value: value})
+	}
+
 	return nil
 }
 
@@ -266,27 +339,45 @@ func finite(value float64) (float64, bool) {
 	return value, true
 }
 
-// deviceKey renders the endpoint and the metric labels into one stable
-// identifier. The endpoint name leads, so two nodes never collide.
-func deviceKey(endpoint Endpoint, metric *dto.Metric) string {
-	parts := make([]string, 0, len(metric.GetLabel())+1)
-	parts = append(parts, endpoint.Name)
+// deviceKey renders the endpoint labels and the metric labels into one stable
+// identifier. The endpoint labels lead, so two nodes never collide, and a
+// label the preset sums over is left out.
+func deviceKey(endpoint Endpoint, metric *dto.Metric, rules preset) string {
+	parts := make([]string, 0, len(metric.GetLabel()))
 	for _, label := range metric.GetLabel() {
-		parts = append(parts, label.GetName()+"="+label.GetValue())
+		if rules.identifies(label.GetName()) {
+			parts = append(parts, label.GetName()+"="+label.GetValue())
+		}
 	}
-	sort.Strings(parts[1:])
+	sort.Strings(parts)
+	if len(parts) == 0 {
+		return LabelKey(endpoint.Labels)
+	}
+	return LabelKey(endpoint.Labels) + "," + strings.Join(parts, ",")
+}
+
+// LabelKey renders a label set as sorted name=value pairs, which is how an
+// endpoint is identified in the artifact and in a configuration.
+func LabelKey(labels map[string]string) string {
+	parts := make([]string, 0, len(labels))
+	for name, value := range labels {
+		parts = append(parts, name+"="+value)
+	}
+	sort.Strings(parts)
 	return strings.Join(parts, ",")
 }
 
 // deviceLabels records what a device is, once, rather than repeating it on
 // every sample.
-func deviceLabels(endpoint Endpoint, metric *dto.Metric) map[string]string {
+func deviceLabels(endpoint Endpoint, metric *dto.Metric, rules preset) map[string]string {
 	labels := map[string]string{}
 	for name, value := range endpoint.Labels {
 		labels[name] = value
 	}
 	for _, label := range metric.GetLabel() {
-		labels[label.GetName()] = label.GetValue()
+		if rules.identifies(label.GetName()) {
+			labels[label.GetName()] = label.GetValue()
+		}
 	}
 	return labels
 }

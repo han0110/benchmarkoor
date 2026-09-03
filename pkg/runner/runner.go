@@ -626,9 +626,9 @@ func (r *runner) RunInstance(ctx context.Context, instance *config.ClientInstanc
 
 		for _, endpoint := range rmCfg.Endpoints {
 			endpoints = append(endpoints, remotemetrics.Endpoint{
-				Name:   endpoint.Name,
-				URL:    endpoint.URL,
-				Labels: endpoint.Labels,
+				Exporter: endpoint.Kind,
+				URL:      endpoint.URL,
+				Labels:   endpoint.Labels,
 			})
 		}
 
@@ -641,8 +641,11 @@ func (r *runner) RunInstance(ctx context.Context, instance *config.ClientInstanc
 		defer func() {
 			stopScraping()
 
-			if failures := scraper.Failures(); failures > 0 {
-				r.logger.WithField("failures", failures).Warn("Remote metric scrapes failed")
+			for url, failure := range scraper.Failures() {
+				r.logger.WithError(failure.Last).WithFields(logrus.Fields{
+					"endpoint": url,
+					"failures": failure.Count,
+				}).Warn("Remote metric scrapes failed")
 			}
 		}()
 	} else if r.cfg.FullConfig != nil && r.cfg.FullConfig.Runner.RemoteMetrics != nil &&

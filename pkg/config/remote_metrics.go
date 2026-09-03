@@ -4,15 +4,16 @@ import (
 	"fmt"
 	"net/url"
 	"time"
+
+	"github.com/ethpandaops/benchmarkoor/pkg/remotemetrics"
 )
 
 // RemoteMetricsConfig scrapes Prometheus text endpoints on remote hosts and
 // records a reduced window for every block a run executes.
 //
-// The feature is generic. Any exporter that serves the Prometheus text format
-// works, because the counter and gauge distinction travels in the TYPE lines
-// of the exposition. A GPU exporter and a stock node exporter are both just
-// endpoints.
+// The endpoints are the sidecars provoor runs on every node. The kind of an
+// endpoint selects the series recorded from it, listed in artifactColumns in
+// package remotemetrics, and the artifact its devices land in.
 type RemoteMetricsConfig struct {
 	Enabled   bool                   `yaml:"enabled" mapstructure:"enabled"`
 	Interval  string                 `yaml:"interval,omitempty" mapstructure:"interval"` // default 100ms
@@ -22,14 +23,15 @@ type RemoteMetricsConfig struct {
 
 // RemoteMetricEndpoint is one exposition to scrape.
 //
-// Name identifies the endpoint in the results and must not carry a hostname,
-// because results are published. Labels are attached to every series the
-// endpoint reports, which is how node identity reaches the results without
-// the exporter having to know it.
+// Kind names the exporter, dcgm-exporter or node-exporter, so one node lists
+// one endpoint per kind. Labels identify the node in the results and are
+// attached to every series the endpoint reports, which is how node identity
+// reaches the results without the exporter having to know it. They must not
+// carry a hostname, because results are published.
 type RemoteMetricEndpoint struct {
-	Name   string            `yaml:"name" mapstructure:"name"`
+	Kind   string            `yaml:"kind" mapstructure:"kind"`
 	URL    string            `yaml:"url" mapstructure:"url"`
-	Labels map[string]string `yaml:"labels,omitempty" mapstructure:"labels"`
+	Labels map[string]string `yaml:"labels" mapstructure:"labels"`
 }
 
 // Default values for RemoteMetricsConfig when fields are left empty.
@@ -78,8 +80,8 @@ func (r *RemoteMetricsConfig) IsEnabled() bool {
 //
 // An unset substitution leaves a URL with no host, which resolves to the
 // machine running the benchmark. Every endpoint would then report that one
-// machine under a different node name, and no scrape would fail. A run must
-// stop rather than publish that.
+// machine under a different node, and no scrape would fail. A run must stop
+// rather than publish that.
 func (r *RemoteMetricsConfig) Validate() error {
 	if !r.IsEnabled() {
 		return nil
@@ -88,25 +90,32 @@ func (r *RemoteMetricsConfig) Validate() error {
 	seen := make(map[string]struct{}, len(r.Endpoints))
 
 	for i, endpoint := range r.Endpoints {
-		if endpoint.Name == "" {
-			return fmt.Errorf("remote_metrics endpoint %d has no name", i)
+		if len(endpoint.Labels) == 0 {
+			return fmt.Errorf("remote_metrics endpoint %d has no labels to identify its node", i)
 		}
 
-		if _, duplicate := seen[endpoint.Name]; duplicate {
-			return fmt.Errorf("remote_metrics endpoint name %q is used twice", endpoint.Name)
+		if _, known := remotemetrics.ArtifactNames[endpoint.Kind]; !known {
+			return fmt.Errorf("remote_metrics endpoint %d kind %q is not %s or %s",
+				i, endpoint.Kind, remotemetrics.ExporterDCGM, remotemetrics.ExporterNode)
 		}
 
-		seen[endpoint.Name] = struct{}{}
+		// The same node and kind twice would fold two expositions into one
+		// device, so the label set identifies an endpoint together with its
+		// kind.
+		key := endpoint.Kind + " " + remotemetrics.LabelKey(endpoint.Labels)
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("remote_metrics lists the %s endpoint %s twice", endpoint.Kind, remotemetrics.LabelKey(endpoint.Labels))
+		}
+
+		seen[key] = struct{}{}
 
 		parsed, err := url.Parse(endpoint.URL)
 		if err != nil {
-			return fmt.Errorf("remote_metrics endpoint %q has an unreadable url %q: %w",
-				endpoint.Name, endpoint.URL, err)
+			return fmt.Errorf("remote_metrics endpoint %d has an unreadable url %q: %w", i, endpoint.URL, err)
 		}
 
 		if parsed.Hostname() == "" {
-			return fmt.Errorf("remote_metrics endpoint %q has no host in url %q",
-				endpoint.Name, endpoint.URL)
+			return fmt.Errorf("remote_metrics endpoint %d has no host in url %q", i, endpoint.URL)
 		}
 	}
 

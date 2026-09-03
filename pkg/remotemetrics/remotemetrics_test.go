@@ -8,13 +8,16 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 // base is an arbitrary fixed instant, so a window is described by offsets.
@@ -111,8 +114,8 @@ DCGM_FI_PROF_DRAM_ACTIVE{gpu="0",UUID="GPU-aaa"} 0.25
 DCGM_FI_PROF_DRAM_ACTIVE{gpu="1",UUID="GPU-bbb"} 0.75
 `
 
-// TestScrapeLearnsKindsFromTheExposition is what makes the package generic.
-// Nothing here names DCGM, so any Prometheus endpoint works unchanged.
+// TestScrapeLearnsKindsFromTheExposition covers how a series learns whether it
+// subtracts or averages. The TYPE line decides the kind, not the field name.
 func TestScrapeLearnsKindsFromTheExposition(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
@@ -121,9 +124,9 @@ func TestScrapeLearnsKindsFromTheExposition(t *testing.T) {
 	defer server.Close()
 
 	scraper := NewScraper([]Endpoint{{
-		Name:   "node0",
-		URL:    server.URL,
-		Labels: map[string]string{"node": "node0"},
+		Exporter: ExporterDCGM,
+		URL:      server.URL,
+		Labels:   map[string]string{"node": "node0"},
 	}}, 10*time.Millisecond, time.Second)
 
 	require.NoError(t, scraper.scrape(context.Background(), scraper.endpoints[0]))
@@ -146,12 +149,12 @@ func TestReduceProducesOneRowPerDevice(t *testing.T) {
 		cycles += 500
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = w.Write([]byte(
-			"# TYPE c counter\nc{gpu=\"0\"} " + formatFloat(cycles) + "\n" +
-				"# TYPE g gauge\ng{gpu=\"0\"} 0.5\n"))
+			"# TYPE DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL counter\nDCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL{gpu=\"0\"} " + formatFloat(cycles) + "\n" +
+				"# TYPE DCGM_FI_PROF_DRAM_ACTIVE gauge\nDCGM_FI_PROF_DRAM_ACTIVE{gpu=\"0\"} 0.5\n"))
 	}))
 	defer server.Close()
 
-	scraper := NewScraper([]Endpoint{{Name: "node0", URL: server.URL}}, 20*time.Millisecond, time.Second)
+	scraper := NewScraper([]Endpoint{{Exporter: ExporterDCGM, URL: server.URL, Labels: map[string]string{"node": "node0"}}}, 20*time.Millisecond, time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	go scraper.Run(ctx)
 
@@ -164,8 +167,8 @@ func TestReduceProducesOneRowPerDevice(t *testing.T) {
 	require.Len(t, windows, 1)
 
 	window := windows[0]
-	assert.Positive(t, window.Metrics["c"].Total, "the counter advanced during the window")
-	assert.InDelta(t, 0.5, window.Metrics["g"].Mean, 0.001)
+	assert.Positive(t, window.Metrics["DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL"].Total, "the counter advanced during the window")
+	assert.InDelta(t, 0.5, window.Metrics["DCGM_FI_PROF_DRAM_ACTIVE"].Mean, 0.001)
 	assert.Positive(t, window.Scrapes)
 	assert.Positive(t, window.Updates)
 }
@@ -179,11 +182,11 @@ func TestRecordBlockAtProductionTiming(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		cycles += 100
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_, _ = w.Write([]byte("# TYPE c counter\nc{gpu=\"0\"} " + formatFloat(cycles) + "\n"))
+		_, _ = w.Write([]byte("# TYPE DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL counter\nDCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL{gpu=\"0\"} " + formatFloat(cycles) + "\n"))
 	}))
 	defer server.Close()
 
-	scraper := NewScraper([]Endpoint{{Name: "node0", URL: server.URL}}, 50*time.Millisecond, time.Second)
+	scraper := NewScraper([]Endpoint{{Exporter: ExporterDCGM, URL: server.URL, Labels: map[string]string{"node": "node0"}}}, 50*time.Millisecond, time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -217,35 +220,36 @@ func TestCollectorSkipsAnEmptyWindow(t *testing.T) {
 // telemetry.
 func TestWriteSkipsAnEmptyRun(t *testing.T) {
 	collector := NewCollector(NewScraper(nil, time.Second, time.Second))
-	path := filepath.Join(t.TempDir(), ArtifactName)
-	require.NoError(t, collector.Write(path))
-	_, err := os.Stat(path)
-	assert.True(t, os.IsNotExist(err), "an empty run must write no artifact")
+	paths, err := collector.Write(t.TempDir())
+	require.NoError(t, err)
+	assert.Empty(t, paths, "an empty run must write no artifact")
 }
 
 // TestArtifactListsEachDeviceOnce covers the shape a run stores. Repeating the
 // label set on every block of every device would dominate the file.
 func TestArtifactListsEachDeviceOnce(t *testing.T) {
-	scraper := NewScraper([]Endpoint{{Name: "node0"}}, time.Second, time.Second)
+	scraper := NewScraper([]Endpoint{{Exporter: ExporterDCGM}}, time.Second, time.Second)
 	now := time.Now()
 	for i := range 4 {
 		at := now.Add(time.Duration(i) * 100 * time.Millisecond)
-		scraper.points[series{metric: "c", device: "node0,gpu=0"}] = append(
-			scraper.points[series{metric: "c", device: "node0,gpu=0"}],
-			point{at: at, value: float64(i * 100)})
+		scraper.points[series{metric: "DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL", device: "node=node0,gpu=0"}] = append(
+			scraper.points[series{metric: "DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL", device: "node=node0,gpu=0"}],
+			point{at: at, value: float64(i * 150)})
 	}
-	scraper.kinds["c"] = KindCounter
-	scraper.devices["node0,gpu=0"] = map[string]string{"node": "node0", "gpu": "0"}
+	scraper.kinds["DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL"] = KindCounter
+	scraper.devices["node=node0,gpu=0"] = map[string]string{"node": "node0", "gpu": "0"}
+	scraper.exporters["node=node0,gpu=0"] = ExporterDCGM
 
 	collector := NewCollector(scraper)
 	collector.RecordBlock("a.json", "0x1", now, now.Add(200*time.Millisecond))
 	collector.RecordBlock("a.json", "0x2", now.Add(100*time.Millisecond), now.Add(300*time.Millisecond))
 	require.Equal(t, 2, collector.Blocks())
 
-	path := filepath.Join(t.TempDir(), ArtifactName)
-	require.NoError(t, collector.Write(path))
+	dir := t.TempDir()
+	_, err := collector.Write(dir)
+	require.NoError(t, err)
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Join(dir, ArtifactNames[ExporterDCGM]))
 	require.NoError(t, err)
 
 	var artifact Artifact
@@ -254,13 +258,236 @@ func TestArtifactListsEachDeviceOnce(t *testing.T) {
 	require.Len(t, artifact.Devices, 1, "one device listed once")
 	assert.Equal(t, "node0", artifact.Devices[0].Labels["node"])
 	require.Len(t, artifact.Tests["a.json"], 2, "both blocks kept")
-	assert.Equal(t, []string{"device", "scrapes", "updates", "c.total"}, artifact.Columns)
-	assert.Equal(t, []string{"c"}, collector.MetricNames())
+	assert.Equal(t,
+		[]string{"device", "scrapes", "updates", "duration_ms", "DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL.total"},
+		artifact.Columns)
 
 	row := artifact.Tests["a.json"]["0x1"][0]
 	require.Len(t, row, len(artifact.Columns), "a row carries one value per column")
-	assert.Equal(t, int64(0), row[0], "rows reference the device table")
-	assert.Equal(t, int64(200), row[3], "the counter total lands in its column")
+	require.NotNil(t, row[0])
+	assert.Equal(t, int64(0), *row[0], "rows reference the device table")
+	require.NotNil(t, row[3])
+	assert.Equal(t, int64(200), *row[3], "the window duration lands in its column")
+	require.NotNil(t, row[4])
+	assert.Equal(t, int64(300), *row[4], "the counter total lands in its column")
+}
+
+// TestArtifactCarriesOnlyTheStatisticsTheResultsPageReads keeps the artifact
+// from carrying a column nothing renders. Every statistic the page names must
+// be written, and every statistic written must be named by the page.
+func TestArtifactCarriesOnlyTheStatisticsTheResultsPageReads(t *testing.T) {
+	pattern := regexp.MustCompile(`(?:DCGM_FI_[A-Z0-9_]+|node_[A-Za-z0-9_]+)\.(?:total|rate_max|mean|min|max)`)
+
+	for exporter, file := range map[string]string{ExporterDCGM: "gpuMetrics.ts", ExporterNode: "nodeMetrics.ts"} {
+		source, err := os.ReadFile(filepath.Join("..", "..", "ui", "src", "utils", file))
+		require.NoError(t, err)
+
+		read := map[string]struct{}{}
+		for _, column := range pattern.FindAllString(string(source), -1) {
+			read[column] = struct{}{}
+		}
+
+		written := map[string]struct{}{}
+		for metric, stats := range artifactColumns[exporter] {
+			for _, stat := range stats {
+				written[metric+"."+stat] = struct{}{}
+			}
+		}
+
+		assert.Equal(t, read, written, exporter)
+	}
+}
+
+// TestNodePresetRecordsExactlyTheArtifactColumns keeps the series the node
+// preset produces and the columns the artifact carries in step, since one is
+// keyed by exposition family and the other by series name.
+func TestNodePresetRecordsExactlyTheArtifactColumns(t *testing.T) {
+	produced := map[string]struct{}{}
+	for _, selections := range nodeExporterPreset.series {
+		for _, sel := range selections {
+			produced[sel.name] = struct{}{}
+		}
+	}
+
+	listed := map[string]struct{}{}
+	for metric := range artifactColumns[ExporterNode] {
+		listed[metric] = struct{}{}
+	}
+
+	assert.Equal(t, listed, produced)
+}
+
+// nodeExposition is the shape the node sidecar serves, trimmed to two cores.
+// The busy modes carry one second each so the sum is countable, and idle
+// carries a large value that must reach the all modes series only.
+const nodeExposition = `# TYPE node_cpu_seconds_total counter
+node_cpu_seconds_total{cpu="0",mode="user"} 1
+node_cpu_seconds_total{cpu="0",mode="system"} 1
+node_cpu_seconds_total{cpu="0",mode="idle"} 1000
+node_cpu_seconds_total{cpu="0",mode="iowait"} 500
+node_cpu_seconds_total{cpu="1",mode="user"} 1
+node_cpu_seconds_total{cpu="1",mode="system"} 1
+node_cpu_seconds_total{cpu="1",mode="idle"} 1000
+# TYPE node_memory_MemTotal_bytes gauge
+node_memory_MemTotal_bytes 6.7149443072e+10
+# TYPE node_memory_MemAvailable_bytes gauge
+node_memory_MemAvailable_bytes 3.9e+10
+# TYPE node_filesystem_size_bytes gauge
+node_filesystem_size_bytes{device="/dev/nvme0n1",mountpoint="/"} 999
+`
+
+// TestSelectionRefusesASampleMissingTheFilteredLabel keeps a sample with no
+// mode label out of the busy series, where it would otherwise count as busy.
+func TestSelectionRefusesASampleMissingTheFilteredLabel(t *testing.T) {
+	busy := nodeExporterPreset.series["node_cpu_seconds_total"][1]
+	require.Equal(t, "node_cpu_busy_seconds_total", busy.name)
+
+	labelled := &dto.Metric{Label: []*dto.LabelPair{{Name: proto.String("cpu"), Value: proto.String("0")}, {Name: proto.String("mode"), Value: proto.String("user")}}}
+	assert.True(t, busy.matches(labelled))
+
+	unlabelled := &dto.Metric{Label: []*dto.LabelPair{{Name: proto.String("cpu"), Value: proto.String("0")}}}
+	assert.False(t, busy.matches(unlabelled), "a sample without a mode is not busy time")
+}
+
+// TestNodeExporterPresetCollapsesToOneDevice is what makes a node exporter
+// usable here. Every core would otherwise become its own device, and the
+// artifact holds one row per device per block.
+func TestNodeExporterPresetCollapsesToOneDevice(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = w.Write([]byte(nodeExposition))
+	}))
+	defer server.Close()
+
+	scraper := NewScraper([]Endpoint{{
+		Exporter: ExporterNode,
+		URL:      server.URL,
+		Labels:   map[string]string{"node": "node1"},
+	}}, time.Second, time.Second)
+	require.NoError(t, scraper.scrape(context.Background(), scraper.endpoints[0]))
+
+	require.Len(t, scraper.devices, 1, "the node must be one device, not one per core")
+	assert.Equal(t, map[string]string{"node": "node1"}, scraper.devices["node=node1"])
+	assert.Equal(t, ExporterNode, scraper.exporters["node=node1"])
+
+	all := scraper.points[series{metric: "node_cpu_seconds_total", device: "node=node1"}]
+	require.Len(t, all, 1, "one reading per series per scrape")
+	assert.InDelta(t, 2504, all[0].value, 0.001, "every mode across both cores")
+
+	busy := scraper.points[series{metric: "node_cpu_busy_seconds_total", device: "node=node1"}]
+	require.Len(t, busy, 1)
+	assert.InDelta(t, 4, busy[0].value, 0.001, "idle and iowait stay out of busy")
+	assert.Equal(t, KindCounter, scraper.kinds["node_cpu_busy_seconds_total"])
+
+	memory := scraper.points[series{metric: "node_memory_MemTotal_bytes", device: "node=node1"}]
+	require.Len(t, memory, 1)
+	assert.InDelta(t, 6.7149443072e10, memory[0].value, 1)
+
+	for key := range scraper.points {
+		assert.NotEqual(t, "node_filesystem_size_bytes", key.metric, "a metric outside the preset was recorded")
+	}
+}
+
+// TestEachExporterWritesItsOwnFile keeps GPU rows and node rows apart. One
+// table would pad every GPU row with the node columns and every node row with
+// the GPU columns, on every block of a run.
+func TestEachExporterWritesItsOwnFile(t *testing.T) {
+	scraper := NewScraper(nil, time.Second, time.Second)
+	now := time.Now()
+	for device, exporter := range map[string]string{"node=node0,gpu=0": ExporterDCGM, "node=node0": ExporterNode} {
+		metric := "DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL"
+		if exporter == ExporterNode {
+			metric = "node_cpu_busy_seconds_total"
+		}
+		key := series{metric: metric, device: device}
+		for i := range 4 {
+			scraper.points[key] = append(scraper.points[key],
+				point{at: now.Add(time.Duration(i) * 100 * time.Millisecond), value: float64(i * 100)})
+		}
+		scraper.kinds[metric] = KindCounter
+		scraper.devices[device] = map[string]string{"node": "node0"}
+		scraper.exporters[device] = exporter
+	}
+
+	collector := NewCollector(scraper)
+	collector.RecordBlock("a.json", "0x1", now, now.Add(200*time.Millisecond))
+	require.Equal(t, 1, collector.Blocks(), "one block, whichever exporters reported it")
+
+	dir := t.TempDir()
+	paths, err := collector.Write(dir)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{
+		filepath.Join(dir, ArtifactNames[ExporterDCGM]),
+		filepath.Join(dir, ArtifactNames[ExporterNode]),
+	}, paths)
+
+	data, err := os.ReadFile(filepath.Join(dir, ArtifactNames[ExporterNode]))
+	require.NoError(t, err)
+	var artifact Artifact
+	require.NoError(t, json.Unmarshal(data, &artifact))
+	assert.Equal(t, []string{"device", "scrapes", "updates", "duration_ms", "node_cpu_busy_seconds_total.total"}, artifact.Columns)
+	require.Len(t, artifact.Devices, 1)
+	assert.Equal(t, "node=node0", artifact.Devices[0].Key)
+}
+
+// TestRowWritesOnlyTheListedStatistics keeps an unlisted statistic out of the
+// row. A gauge reduces to three numbers, and a page that reads two of them
+// must not pay for the third on every device of every block.
+func TestRowWritesOnlyTheListedStatistics(t *testing.T) {
+	scraper := NewScraper([]Endpoint{{Exporter: ExporterDCGM}}, time.Second, time.Second)
+	now := time.Now()
+	key := series{metric: "DCGM_FI_DEV_POWER_USAGE", device: "node=node0,gpu=0"}
+	for i, watts := range []float64{100, 200, 300} {
+		scraper.points[key] = append(scraper.points[key],
+			point{at: now.Add(time.Duration(i) * 100 * time.Millisecond), value: watts})
+	}
+	scraper.kinds["DCGM_FI_DEV_POWER_USAGE"] = KindGauge
+	scraper.devices["node=node0,gpu=0"] = map[string]string{"node": "node0"}
+	scraper.exporters["node=node0,gpu=0"] = ExporterDCGM
+
+	collector := NewCollector(scraper)
+	collector.RecordBlock("a.json", "0x1", now, now.Add(200*time.Millisecond))
+	require.Equal(t, 1, collector.Blocks())
+
+	assert.Equal(t, []string{"DCGM_FI_DEV_POWER_USAGE.mean", "DCGM_FI_DEV_POWER_USAGE.max"},
+		collector.tables[ExporterDCGM].columns, "the minimum is read by nothing and must not be written")
+
+	row := collector.tables[ExporterDCGM].tests["a.json"]["0x1"][0]
+	require.NotNil(t, row[4])
+	assert.Equal(t, int64(200*gaugeScale), *row[4])
+	require.NotNil(t, row[5])
+	assert.Equal(t, int64(300*gaugeScale), *row[5])
+}
+
+// TestStatisticRefusesTheOtherKind guards against an exporter that declares a
+// listed counter as a gauge. Its total would otherwise be written as a zero,
+// which reads as a device that did no work.
+func TestStatisticRefusesTheOtherKind(t *testing.T) {
+	_, _, ok := statistic(Stat{Total: 5}, KindGauge, "total")
+	assert.False(t, ok)
+
+	_, _, ok = statistic(Stat{Mean: 5}, KindCounter, "mean")
+	assert.False(t, ok)
+}
+
+// TestScrapeDropsAMetricOutsideTheArtifact keeps the buffer as small as the
+// artifact. A field nothing writes has no reason to be held for fifteen
+// minutes on every device.
+func TestScrapeDropsAMetricOutsideTheArtifact(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = w.Write([]byte(
+			"# TYPE DCGM_FI_DEV_CLOCKS_EVENT_REASONS gauge\nDCGM_FI_DEV_CLOCKS_EVENT_REASONS{gpu=\"0\"} 4\n" +
+				"# TYPE DCGM_FI_PROF_DRAM_ACTIVE gauge\nDCGM_FI_PROF_DRAM_ACTIVE{gpu=\"0\"} 0.5\n"))
+	}))
+	defer server.Close()
+
+	scraper := NewScraper([]Endpoint{{Exporter: ExporterDCGM, URL: server.URL, Labels: map[string]string{"node": "node0"}}}, time.Second, time.Second)
+	require.NoError(t, scraper.scrape(context.Background(), scraper.endpoints[0]))
+
+	assert.Empty(t, scraper.points[series{metric: "DCGM_FI_DEV_CLOCKS_EVENT_REASONS", device: "node=node0,gpu=0"}],
+		"a metric outside the artifact was buffered")
+	assert.Len(t, scraper.points[series{metric: "DCGM_FI_PROF_DRAM_ACTIVE", device: "node=node0,gpu=0"}], 1)
 }
 
 // TestCounterResetOutsideTheWindowIsIgnored covers an exporter restart earlier
@@ -339,34 +566,35 @@ func TestNonFiniteSamplesAreRefused(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = w.Write([]byte(
-			"# TYPE c counter\nc{gpu=\"0\"} NaN\n" +
-				"# TYPE g gauge\ng{gpu=\"0\"} +Inf\n" +
-				"# TYPE h gauge\nh{gpu=\"0\"} 0.5\n"))
+			"# TYPE DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL counter\nDCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL{gpu=\"0\"} NaN\n" +
+				"# TYPE DCGM_FI_PROF_DRAM_ACTIVE gauge\nDCGM_FI_PROF_DRAM_ACTIVE{gpu=\"0\"} +Inf\n" +
+				"# TYPE DCGM_FI_PROF_SM_OCCUPANCY gauge\nDCGM_FI_PROF_SM_OCCUPANCY{gpu=\"0\"} 0.5\n"))
 	}))
 	defer server.Close()
 
-	scraper := NewScraper([]Endpoint{{Name: "node0", URL: server.URL}}, time.Second, time.Second)
+	scraper := NewScraper([]Endpoint{{Exporter: ExporterDCGM, URL: server.URL, Labels: map[string]string{"node": "node0"}}}, time.Second, time.Second)
 	require.NoError(t, scraper.scrape(context.Background(), scraper.endpoints[0]))
 
-	assert.Empty(t, scraper.points[series{metric: "c", device: "node0,gpu=0"}], "NaN was stored")
-	assert.Empty(t, scraper.points[series{metric: "g", device: "node0,gpu=0"}], "Inf was stored")
-	assert.Len(t, scraper.points[series{metric: "h", device: "node0,gpu=0"}], 1,
+	assert.Empty(t, scraper.points[series{metric: "DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL", device: "node=node0,gpu=0"}], "NaN was stored")
+	assert.Empty(t, scraper.points[series{metric: "DCGM_FI_PROF_DRAM_ACTIVE", device: "node=node0,gpu=0"}], "Inf was stored")
+	assert.Len(t, scraper.points[series{metric: "DCGM_FI_PROF_SM_OCCUPANCY", device: "node=node0,gpu=0"}], 1,
 		"a healthy sample beside a bad one must survive")
 }
 
 // TestUnmeasuredMetricIsNotAZero is the difference between a GPU that did no
 // work and a GPU nothing observed. Both would otherwise be a row of zeroes.
 func TestUnmeasuredMetricIsNotAZero(t *testing.T) {
-	scraper := NewScraper([]Endpoint{{Name: "node0"}}, time.Second, time.Second)
+	scraper := NewScraper([]Endpoint{{Exporter: ExporterDCGM}}, time.Second, time.Second)
 	now := time.Now()
-	key := series{metric: "present", device: "node0,gpu=0"}
+	key := series{metric: "DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL", device: "node=node0,gpu=0"}
 	for i := range 4 {
 		scraper.points[key] = append(scraper.points[key],
 			point{at: now.Add(time.Duration(i) * 100 * time.Millisecond), value: float64(i * 100)})
 	}
-	scraper.kinds["present"] = KindCounter
-	scraper.kinds["absent"] = KindCounter
-	scraper.devices["node0,gpu=0"] = map[string]string{"node": "node0"}
+	scraper.kinds["DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL"] = KindCounter
+	scraper.kinds["DCGM_FI_PROF_SM_CYCLES_ACTIVE_TOTAL"] = KindCounter
+	scraper.devices["node=node0,gpu=0"] = map[string]string{"node": "node0"}
+	scraper.exporters["node=node0,gpu=0"] = ExporterDCGM
 
 	collector := NewCollector(scraper)
 	collector.RecordBlock("a.json", "0x1", now, now.Add(200*time.Millisecond))
@@ -374,12 +602,13 @@ func TestUnmeasuredMetricIsNotAZero(t *testing.T) {
 
 	// A column that appears only later leaves the earlier row short, and the
 	// padding must not read as a measurement.
-	collector.columnIndex("absent", "total")
+	collector.table(ExporterDCGM).columnIndex("DCGM_FI_PROF_SM_CYCLES_ACTIVE_TOTAL", "total")
 
-	path := filepath.Join(t.TempDir(), ArtifactName)
-	require.NoError(t, collector.Write(path))
+	dir := t.TempDir()
+	_, err := collector.Write(dir)
+	require.NoError(t, err)
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Join(dir, ArtifactNames[ExporterDCGM]))
 	require.NoError(t, err)
 
 	var artifact Artifact
@@ -387,17 +616,19 @@ func TestUnmeasuredMetricIsNotAZero(t *testing.T) {
 
 	row := artifact.Tests["a.json"]["0x1"][0]
 	require.Len(t, row, len(artifact.Columns))
-	assert.Equal(t, int64(200), row[3], "the measured counter keeps its value")
-	assert.Equal(t, int64(noReading), row[4], "an unmeasured column must not be zero")
+	require.NotNil(t, row[4])
+	assert.Equal(t, int64(200), *row[4], "the measured counter keeps its value")
+	assert.Nil(t, row[5], "an unmeasured column is null, not zero")
 }
 
 // TestQuantiseRefusesWhatInt64CannotHold keeps a sentinel or an overflowing
 // scale from landing in the artifact as a real number.
 func TestQuantiseRefusesWhatInt64CannotHold(t *testing.T) {
-	assert.Equal(t, int64(5000), quantise(0.5, gaugeScale))
-	assert.Equal(t, int64(noReading), quantise(math.NaN(), 1))
-	assert.Equal(t, int64(noReading), quantise(math.Inf(1), 1))
-	assert.Equal(t, int64(noReading), quantise(9.0e18, gaugeScale))
+	require.NotNil(t, quantise(0.5, gaugeScale))
+	assert.Equal(t, int64(5000), *quantise(0.5, gaugeScale))
+	assert.Nil(t, quantise(math.NaN(), 1))
+	assert.Nil(t, quantise(math.Inf(1), 1))
+	assert.Nil(t, quantise(9.0e18, gaugeScale))
 }
 
 // TestStalledEndpointDoesNotStarveOthers covers one unreachable node on a rig
@@ -417,13 +648,13 @@ func TestStalledEndpointDoesNotStarveOthers(t *testing.T) {
 	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		served.Add(1)
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_, _ = w.Write([]byte("# TYPE c counter\nc{gpu=\"0\"} 1\n"))
+		_, _ = w.Write([]byte("# TYPE DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL counter\nDCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL{gpu=\"0\"} 1\n"))
 	}))
 	defer healthy.Close()
 
 	scraper := NewScraper([]Endpoint{
-		{Name: "stalled", URL: stalled.URL},
-		{Name: "healthy", URL: healthy.URL},
+		{Exporter: ExporterDCGM, URL: stalled.URL, Labels: map[string]string{"node": "stalled"}},
+		{Exporter: ExporterDCGM, URL: healthy.URL, Labels: map[string]string{"node": "healthy"}},
 	}, 20*time.Millisecond, 5*time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -438,6 +669,54 @@ func TestStalledEndpointDoesNotStarveOthers(t *testing.T) {
 		"the healthy endpoint was throttled by the stalled one")
 }
 
+// TestFailuresNameTheEndpoint covers the log a run leaves when an artifact is
+// missing. A count alone cannot say which endpoint never answered.
+func TestFailuresNameTheEndpoint(t *testing.T) {
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer broken.Close()
+
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = w.Write([]byte("# TYPE DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL counter\nDCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL{gpu=\"0\"} 1\n"))
+	}))
+	defer healthy.Close()
+
+	scraper := NewScraper([]Endpoint{
+		{Exporter: ExporterDCGM, URL: healthy.URL, Labels: map[string]string{"node": "node0"}},
+		{Exporter: ExporterNode, URL: broken.URL, Labels: map[string]string{"node": "node0"}},
+	}, 20*time.Millisecond, time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go scraper.Run(ctx)
+	time.Sleep(200 * time.Millisecond)
+
+	failures := scraper.Failures()
+	require.Len(t, failures, 1, "only the broken endpoint fails")
+	assert.Greater(t, failures[broken.URL].Count, 2)
+	assert.ErrorContains(t, failures[broken.URL].Last, "503")
+}
+
+// TestWrongServiceOnThePortIsAFailure covers a port held by another exporter.
+// It answers 200 with metrics of its own, so without this check a run ends
+// with no artifact and no word about why.
+func TestWrongServiceOnThePortIsAFailure(t *testing.T) {
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = w.Write([]byte("# TYPE haproxy_up gauge\nhaproxy_up 1\n"))
+	}))
+	defer other.Close()
+
+	scraper := NewScraper([]Endpoint{{Exporter: ExporterNode, URL: other.URL, Labels: map[string]string{"node": "node0"}}}, time.Second, time.Second)
+	err := scraper.scrape(context.Background(), Endpoint{Exporter: ExporterNode, URL: other.URL, Labels: map[string]string{"node": "node0"}})
+
+	require.ErrorContains(t, err, "serves none of the node-exporter series")
+	assert.Empty(t, scraper.points)
+}
+
 // TestSettleKeepsTheFinalBlock covers the last block of a run. Nothing arrives
 // after it to carry its window, so without a wait it would be dropped.
 func TestSettleKeepsTheFinalBlock(t *testing.T) {
@@ -445,11 +724,11 @@ func TestSettleKeepsTheFinalBlock(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		cycles += 100
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_, _ = w.Write([]byte("# TYPE c counter\nc{gpu=\"0\"} " + formatFloat(cycles) + "\n"))
+		_, _ = w.Write([]byte("# TYPE DCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL counter\nDCGM_FI_PROF_SM_CYCLES_ELAPSED_TOTAL{gpu=\"0\"} " + formatFloat(cycles) + "\n"))
 	}))
 	defer server.Close()
 
-	scraper := NewScraper([]Endpoint{{Name: "node0", URL: server.URL}}, 50*time.Millisecond, time.Second)
+	scraper := NewScraper([]Endpoint{{Exporter: ExporterDCGM, URL: server.URL, Labels: map[string]string{"node": "node0"}}}, 50*time.Millisecond, time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -466,4 +745,48 @@ func TestSettleKeepsTheFinalBlock(t *testing.T) {
 
 func formatFloat(v float64) string {
 	return strconv.FormatFloat(v, 'f', -1, 64)
+}
+
+// TestPeakRateFindsABurstTheTotalHides is why a counter reports a rate as well
+// as a total. A link saturates for a moment inside a much longer block, and a
+// total spread over the whole block averages that moment away.
+func TestPeakRateFindsABurstTheTotalHides(t *testing.T) {
+	// Two seconds of near silence with one 100ms burst of 500MB.
+	var series []point
+	value := 0.0
+	for offset := 0; offset <= 2000; offset += 100 {
+		series = append(series, point{at: at(offset), value: value})
+		if offset == 1000 {
+			value += 500e6
+		} else {
+			value += 1e6
+		}
+	}
+
+	stat, _, _, ok := reduce(series, KindCounter, at(0), at(2000), 100*time.Millisecond)
+	require.True(t, ok)
+
+	meanRate := stat.Total / 2
+	assert.InDelta(t, 5e9, stat.PeakRate, 1e6, "the burst rate is 500MB over 100ms")
+	assert.Greater(t, stat.PeakRate/meanRate, 15.0,
+		"the mean rate understated the burst by more than fifteen times")
+}
+
+// TestPeakRateFollowsTheSourceNotTheScraper covers a source refreshing at
+// 1 Hz under a 10 Hz poll. Nine flat readings and one jump must read as one
+// second of advance, not a tenth of one. The bracket starts between two
+// refreshes, as a block does, so the first change has no refresh to measure
+// from.
+func TestPeakRateFollowsTheSourceNotTheScraper(t *testing.T) {
+	slow := func(from, to int) []point {
+		var series []point
+		for offset := from; offset <= to; offset += 100 {
+			series = append(series, point{at: at(offset), value: float64(offset/1000) * 1000})
+		}
+		return series
+	}
+
+	assert.InDelta(t, 1000, peakRate(slow(900, 3000)), 0.001, "three refreshes")
+	assert.InDelta(t, 1000.0/1.5, peakRate(slow(0, 1500)), 0.001, "one refresh falls back to the bracket mean")
+	assert.Zero(t, peakRate(slow(1000, 1900)), "no refresh is no advance")
 }

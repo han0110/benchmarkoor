@@ -719,3 +719,21 @@ export interface BlockLogEntry {
 }
 
 export type BlockLogs = Record<string, BlockLogEntry>
+
+// Remote metric types from result.device-metrics.json and result.node-metrics.json.
+//
+// The layout is columnar. Column names and device labels are written once, and
+// every row is a positional array indexed by `columns`. A cell is null when the
+// window could not measure that column, which is not the same as zero.
+export interface DeviceMetricDevice {
+  key: string
+  labels: Record<string, string>
+}
+
+export interface DeviceMetrics {
+  schemaVersion: number
+  columns: string[]
+  devices: DeviceMetricDevice[]
+  /** test file -> block hash -> one row per device. */
+  tests: Record<string, Record<string, Array<Array<number | null>>>>
+}

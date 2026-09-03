@@ -62,7 +62,7 @@ function CopyButton({ text }: { text: string }) {
 
 // --- Entry generators ---
 
-const GENERAL_FILES = ['benchmarkoor.log', 'container.log', 'config.json', 'result.json', 'result.block-logs.json'] as const
+const GENERAL_FILES = ['benchmarkoor.log', 'container.log', 'config.json', 'result.json', 'result.block-logs.json', 'result.device-metrics.json', 'result.node-metrics.json'] as const
 
 function buildGeneralEntries(runId: string): FileEntry[] {
   return GENERAL_FILES.map((filename) => ({

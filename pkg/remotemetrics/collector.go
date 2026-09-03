@@ -4,18 +4,15 @@ import (
 	"encoding/json"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 )
 
-// ArtifactName is the file the collector writes beside the other per-run
-// results.
-const ArtifactName = "result.device-metrics.json"
-
 // schemaVersion travels with the artifact so a reader can reject a shape it
 // does not understand.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // Artifact is the reduced result of a whole run.
 //
@@ -23,11 +20,15 @@ const schemaVersion = 1
 // and a rig of sixteen devices over several thousand blocks makes the row
 // count the only thing that matters. Column names and device labels are
 // written once, and every row is a bare number array indexed by Columns.
+//
+// A column the window could not measure is null. A row is positional, so the
+// column cannot be left out. It must not be zero, because an idle device and
+// an unobserved device are different results.
 type Artifact struct {
-	SchemaVersion int                             `json:"schemaVersion"`
-	Columns       []string                        `json:"columns"`
-	Devices       []Device                        `json:"devices"`
-	Tests         map[string]map[string][][]int64 `json:"tests"`
+	SchemaVersion int                              `json:"schemaVersion"`
+	Columns       []string                         `json:"columns"`
+	Devices       []Device                         `json:"devices"`
+	Tests         map[string]map[string][][]*int64 `json:"tests"`
 }
 
 // Device names one source of metrics.
@@ -37,43 +38,95 @@ type Device struct {
 }
 
 // leadingColumns precede the metric values in every row.
-var leadingColumns = []string{"device", "scrapes", "updates"}
+//
+// The window duration travels with the row so a reader can turn a counter
+// total into a share of the block. Nanoseconds throttled mean nothing until
+// they are divided by the time the block took.
+var leadingColumns = []string{"device", "scrapes", "updates", "duration_ms"}
 
 // gaugeScale fixes gauge precision. A ratio carries four decimals, which is
 // finer than the hardware reports, and an integer costs fewer bytes than the
 // same number with a decimal point.
 const gaugeScale = 10000
 
-// noReading marks a column the window could not measure. Zero cannot serve,
-// because a device that did no work and a device that was never observed are
-// different results and a reader must be able to tell them apart.
-const noReading = math.MinInt64
+// statistic picks one named statistic out of a reduced metric, with the scale
+// it is stored at. A counter carries a total and a peak rate. A gauge carries
+// a mean, a minimum and a maximum. A name of the other kind reports nothing
+// rather than a zero.
+func statistic(stat Stat, kind Kind, name string) (float64, float64, bool) {
+	switch {
+	case kind == KindCounter && name == "total":
+		return stat.Total, 1, true
+	case kind == KindCounter && name == "rate_max":
+		return stat.PeakRate, 1, true
+	case kind == KindGauge && name == "mean":
+		return stat.Mean, gaugeScale, true
+	case kind == KindGauge && name == "min":
+		return stat.Min, gaugeScale, true
+	case kind == KindGauge && name == "max":
+		return stat.Max, gaugeScale, true
+	}
 
-// quantise renders a statistic as an integer, refusing a value int64 cannot
-// hold so that an overflow never lands in the artifact as a real number.
-func quantise(value, scale float64) int64 {
+	return 0, 0, false
+}
+
+// quantise renders a statistic as an integer. It reports nothing for a value
+// int64 cannot hold, so an overflow never lands in the artifact looking like a
+// measurement.
+func quantise(value, scale float64) *int64 {
 	scaled := math.Round(value * scale)
 	if math.IsNaN(scaled) || scaled >= math.MaxInt64 || scaled <= math.MinInt64 {
-		return noReading
+		return nil
 	}
-	return int64(scaled)
+
+	whole := int64(scaled)
+
+	return &whole
+}
+
+// measured wraps a count that always exists, such as a row's leading columns.
+func measured(value int64) *int64 {
+	return &value
 }
 
 // Collector cuts a window for every block the executor times and holds the
-// reduced result until the run ends.
+// reduced result until the run ends. Rows are kept in one table per exporter,
+// because each kind of device carries its own columns and lands in its own
+// file.
 type Collector struct {
 	scraper *Scraper
 
 	mu      sync.Mutex
+	tables  map[string]*table
+	blocks  int
+	pending []pending
+	dropped int
+}
+
+// table is the artifact of one exporter as it accumulates.
+type table struct {
 	devices []string
 	index   map[string]int
 	labels  map[string]map[string]string
 	columns []string
 	column  map[string]int
-	kinds   map[string]Kind
-	tests   map[string]map[string][][]int64
-	pending []pending
-	dropped int
+	tests   map[string]map[string][][]*int64
+}
+
+// table returns the table of an exporter, creating it on first use. The
+// caller holds the lock.
+func (c *Collector) table(exporter string) *table {
+	t, ok := c.tables[exporter]
+	if !ok {
+		t = &table{
+			index:  map[string]int{},
+			labels: map[string]map[string]string{},
+			column: map[string]int{},
+			tests:  map[string]map[string][][]*int64{},
+		}
+		c.tables[exporter] = t
+	}
+	return t
 }
 
 // pending is a block window waiting for the samples that cover it.
@@ -86,14 +139,7 @@ type pending struct {
 
 // NewCollector builds a collector over a running scraper.
 func NewCollector(scraper *Scraper) *Collector {
-	return &Collector{
-		scraper: scraper,
-		index:   map[string]int{},
-		labels:  map[string]map[string]string{},
-		column:  map[string]int{},
-		kinds:   map[string]Kind{},
-		tests:   map[string]map[string][][]int64{},
-	}
+	return &Collector{scraper: scraper, tables: map[string]*table{}}
 }
 
 // RecordBlock queues one block's window. The executor calls this the instant
@@ -113,8 +159,8 @@ func (c *Collector) RecordBlock(testFile, blockHash string, start, end time.Time
 }
 
 // flush reduces every queued window whose samples have caught up. A window
-// that still cannot be reduced once readings exist past its end never will,
-// so it is counted rather than retried forever.
+// that still cannot be reduced after every series caught up, or the grace
+// passed, never will. It is counted rather than retried forever.
 //
 // The queue is ordered by window end, because blocks are executed in turn. A
 // window that must still wait therefore proves that every window behind it
@@ -128,16 +174,20 @@ func (c *Collector) flush() {
 	c.mu.Unlock()
 
 	for index, block := range queued {
+		// A block waits for every series to catch up, for at most the
+		// readiness grace, so a slow endpoint keeps its rows and a dead one
+		// costs only its own.
+		if !c.scraper.settled(block.end) &&
+			time.Since(block.end) < c.scraper.readinessGrace() {
+			c.mu.Lock()
+			c.pending = append(append([]pending{}, queued[index:]...), c.pending...)
+			c.mu.Unlock()
+
+			return
+		}
+
 		windows := c.scraper.Reduce(block.start, block.end)
 		if len(windows) == 0 {
-			if !c.scraper.hasDataPast(block.end) {
-				c.mu.Lock()
-				c.pending = append(append([]pending{}, queued[index:]...), c.pending...)
-				c.mu.Unlock()
-
-				return
-			}
-
 			c.mu.Lock()
 			c.dropped++
 			c.mu.Unlock()
@@ -146,16 +196,20 @@ func (c *Collector) flush() {
 		}
 
 		c.mu.Lock()
-		if c.tests[block.testFile] == nil {
-			c.tests[block.testFile] = map[string][][]int64{}
-		}
-
-		rows := make([][]int64, 0, len(windows))
+		rows := map[string][][]*int64{}
 		for _, window := range windows {
-			rows = append(rows, c.row(window))
+			rows[window.Exporter] = append(rows[window.Exporter], c.row(window, block.end.Sub(block.start)))
 		}
 
-		c.tests[block.testFile][block.blockHash] = rows
+		for exporter, exporterRows := range rows {
+			t := c.table(exporter)
+			if t.tests[block.testFile] == nil {
+				t.tests[block.testFile] = map[string][][]*int64{}
+			}
+			t.tests[block.testFile][block.blockHash] = exporterRows
+		}
+
+		c.blocks++
 		c.mu.Unlock()
 	}
 }
@@ -197,11 +251,12 @@ func (c *Collector) Dropped() int {
 	return c.dropped + len(c.pending)
 }
 
-// row renders one window into the columnar form, adding any column the run
-// has not seen before. Values are rounded, because a counter is a whole
-// count and a gauge is finer than the hardware reports well past four
-// decimals.
-func (c *Collector) row(window DeviceWindow) []int64 {
+// row renders one window into the columnar form of its exporter, adding any
+// column the run has not seen before. Values are rounded, because a counter
+// is a whole count and a gauge is finer than the hardware reports well past
+// four decimals. The caller holds the lock.
+func (c *Collector) row(window DeviceWindow, duration time.Duration) []*int64 {
+	t := c.table(window.Exporter)
 	// Sorted, because map order would otherwise decide the column layout and
 	// two runs of the same input would not produce comparable artifacts.
 	metrics := make([]string, 0, len(window.Metrics))
@@ -211,28 +266,28 @@ func (c *Collector) row(window DeviceWindow) []int64 {
 
 	sort.Strings(metrics)
 
-	values := map[int]int64{}
+	values := map[int]*int64{}
 
 	for _, metric := range metrics {
 		stat := window.Metrics[metric]
 		kind := c.scraper.kindOf(metric)
-		c.kinds[metric] = kind
-		if kind == KindCounter {
-			values[c.columnIndex(metric, "total")] = quantise(stat.Total, 1)
-			continue
+		for _, name := range artifactColumns[window.Exporter][metric] {
+			value, scale, ok := statistic(stat, kind, name)
+			if !ok {
+				continue
+			}
+			values[t.columnIndex(metric, name)] = quantise(value, scale)
 		}
-		values[c.columnIndex(metric, "mean")] = quantise(stat.Mean, gaugeScale)
-		values[c.columnIndex(metric, "min")] = quantise(stat.Min, gaugeScale)
-		values[c.columnIndex(metric, "max")] = quantise(stat.Max, gaugeScale)
 	}
 
-	row := make([]int64, len(leadingColumns)+len(c.columns))
-	row[0] = int64(c.deviceIndex(window))
-	row[1] = int64(window.Scrapes)
-	row[2] = int64(window.Updates)
-	for position := len(leadingColumns); position < len(row); position++ {
-		row[position] = noReading
-	}
+	// Every metric column starts null and takes only a statistic this
+	// window produced.
+	row := make([]*int64, len(leadingColumns)+len(t.columns))
+	row[0] = measured(int64(t.deviceIndex(window)))
+	row[1] = measured(int64(window.Scrapes))
+	row[2] = measured(int64(window.Updates))
+	row[3] = measured(duration.Milliseconds())
+
 	for position, value := range values {
 		row[len(leadingColumns)+position] = value
 	}
@@ -240,26 +295,26 @@ func (c *Collector) row(window DeviceWindow) []int64 {
 }
 
 // columnIndex assigns each metric statistic a stable position.
-func (c *Collector) columnIndex(metric, stat string) int {
+func (t *table) columnIndex(metric, stat string) int {
 	name := metric + "." + stat
-	if position, ok := c.column[name]; ok {
+	if position, ok := t.column[name]; ok {
 		return position
 	}
-	position := len(c.columns)
-	c.column[name] = position
-	c.columns = append(c.columns, name)
+	position := len(t.columns)
+	t.column[name] = position
+	t.columns = append(t.columns, name)
 	return position
 }
 
 // deviceIndex assigns each device a stable position in the artifact table.
-func (c *Collector) deviceIndex(window DeviceWindow) int {
-	if position, ok := c.index[window.Device]; ok {
+func (t *table) deviceIndex(window DeviceWindow) int {
+	if position, ok := t.index[window.Device]; ok {
 		return position
 	}
-	position := len(c.devices)
-	c.index[window.Device] = position
-	c.devices = append(c.devices, window.Device)
-	c.labels[window.Device] = window.Labels
+	position := len(t.devices)
+	t.index[window.Device] = position
+	t.devices = append(t.devices, window.Device)
+	t.labels[window.Device] = window.Labels
 	return position
 }
 
@@ -272,39 +327,54 @@ func (c *Collector) Blocks() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	var count int
-	for _, blocks := range c.tests {
-		count += len(blocks)
-	}
-
-	return count
+	return c.blocks
 }
 
-// Write saves the artifact. It writes nothing when no window was recorded, so
-// an empty file never suggests a GPU that did no work.
-func (c *Collector) Write(path string) error {
+// Write saves one artifact per exporter into dir and reports the paths
+// written. An exporter with no window recorded writes no file, so an empty
+// file never suggests a device that did no work.
+func (c *Collector) Write(dir string) ([]string, error) {
 	c.flush()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if len(c.tests) == 0 {
-		return nil
+	exporters := make([]string, 0, len(c.tables))
+	for exporter := range c.tables {
+		exporters = append(exporters, exporter)
 	}
+	sort.Strings(exporters)
 
-	devices := make([]Device, 0, len(c.devices))
-	for _, key := range c.devices {
-		devices = append(devices, Device{Key: key, Labels: c.labels[key]})
+	var paths []string
+	for _, exporter := range exporters {
+		t := c.tables[exporter]
+		if len(t.tests) == 0 {
+			continue
+		}
+		path := filepath.Join(dir, ArtifactNames[exporter])
+		if err := os.WriteFile(path, t.encode(), 0o644); err != nil {
+			return paths, err
+		}
+		paths = append(paths, path)
 	}
-	// A row written before a later column appeared is short, so pad every
-	// row to the final width rather than leaving a ragged array. The padding
-	// marks a metric this window never carried, not a measured zero.
-	width := len(leadingColumns) + len(c.columns)
-	for _, blocks := range c.tests {
+	return paths, nil
+}
+
+// encode renders the table as the artifact. A row written before a later
+// column appeared is short, so every row is padded to the final width rather
+// than left ragged. The padding is null, marking a metric this window never
+// carried.
+func (t *table) encode() []byte {
+	devices := make([]Device, 0, len(t.devices))
+	for _, key := range t.devices {
+		devices = append(devices, Device{Key: key, Labels: t.labels[key]})
+	}
+	width := len(leadingColumns) + len(t.columns)
+	for _, blocks := range t.tests {
 		for hash, rows := range blocks {
 			for i, row := range rows {
 				for len(row) < width {
-					row = append(row, noReading)
+					row = append(row, nil)
 				}
 				rows[i] = row
 			}
@@ -313,25 +383,15 @@ func (c *Collector) Write(path string) error {
 	}
 	artifact := Artifact{
 		SchemaVersion: schemaVersion,
-		Columns:       append(append([]string{}, leadingColumns...), c.columns...),
+		Columns:       append(append([]string{}, leadingColumns...), t.columns...),
 		Devices:       devices,
-		Tests:         c.tests,
+		Tests:         t.tests,
 	}
+	// The artifact holds only integers, strings, and nulls, so encoding
+	// cannot fail.
 	data, err := json.Marshal(artifact)
 	if err != nil {
-		return err
+		panic(err)
 	}
-	return os.WriteFile(path, data, 0o644)
-}
-
-// MetricNames lists every metric the artifact carries, ordered.
-func (c *Collector) MetricNames() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	names := make([]string, 0, len(c.kinds))
-	for name := range c.kinds {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return data
 }

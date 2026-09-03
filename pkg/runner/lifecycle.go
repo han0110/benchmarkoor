@@ -25,7 +25,6 @@ import (
 	"github.com/ethpandaops/benchmarkoor/pkg/fsutil"
 	"github.com/ethpandaops/benchmarkoor/pkg/genesis"
 	"github.com/ethpandaops/benchmarkoor/pkg/podman"
-	"github.com/ethpandaops/benchmarkoor/pkg/remotemetrics"
 	"github.com/ethpandaops/benchmarkoor/pkg/version"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/host"
@@ -1550,17 +1549,20 @@ func (r *runner) runContainerLifecycle(
 	}
 
 	if params.RemoteMetrics != nil && params.RemoteMetrics.Blocks() > 0 {
-		path := filepath.Join(runResultsDir, remotemetrics.ArtifactName)
-		if err := params.RemoteMetrics.Write(path); err != nil {
+		paths, err := params.RemoteMetrics.Write(runResultsDir)
+		if err != nil {
 			log.WithError(err).Warn("Failed to write remote metrics result")
 		} else {
 			if r.cfg.ResultsOwner != nil {
-				fsutil.Chown(path, r.cfg.ResultsOwner)
+				for _, path := range paths {
+					fsutil.Chown(path, r.cfg.ResultsOwner)
+				}
 			}
 
 			log.WithFields(logrus.Fields{
 				"blocks":  params.RemoteMetrics.Blocks(),
 				"dropped": params.RemoteMetrics.Dropped(),
+				"files":   len(paths),
 			}).Info("Remote metrics written")
 		}
 	} else if params.RemoteMetrics != nil {

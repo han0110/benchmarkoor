@@ -9,24 +9,37 @@ runner:
   # The forwarder listens only after worker readiness and a warmup proof.
   ready_timeout: 15m
 
-  # GPU metrics from the DCGM exporter sidecar provoor runs on every node.
-  # Counters are subtracted over each block and gauges are averaged, so the
-  # exporter needs no per-metric configuration here.
+  # Per-block metrics from the sidecars provoor runs on every node. The kind
+  # of each endpoint selects the series recorded from it, so no metric list
+  # belongs here. Counters are subtracted over each block and gauges are
+  # averaged.
   remote_metrics:
     enabled: true
     interval: 100ms
     endpoints:
-      - name: node1
+      - kind: dcgm-exporter
         url: http://${NODE1_IP}:9401/metrics
         labels: { node: node1 }
-      - name: node2
+      - kind: dcgm-exporter
         url: http://${NODE2_IP}:9401/metrics
         labels: { node: node2 }
-      - name: node3
+      - kind: dcgm-exporter
         url: http://${NODE3_IP}:9401/metrics
         labels: { node: node3 }
-      - name: node4
+      - kind: dcgm-exporter
         url: http://${NODE4_IP}:9401/metrics
+        labels: { node: node4 }
+      - kind: node-exporter
+        url: http://${NODE1_IP}:9402/metrics
+        labels: { node: node1 }
+      - kind: node-exporter
+        url: http://${NODE2_IP}:9402/metrics
+        labels: { node: node2 }
+      - kind: node-exporter
+        url: http://${NODE3_IP}:9402/metrics
+        labels: { node: node3 }
+      - kind: node-exporter
+        url: http://${NODE4_IP}:9402/metrics
         labels: { node: node4 }
 
   benchmark:
