@@ -94,6 +94,12 @@ type BlockLogCollector interface {
 	RegisterBlockHash(testName, blockHash string)
 }
 
+// BlockWindowRecorder receives the instants one block payload occupied, so a
+// remote metrics collector can reduce its samples over the same window.
+type BlockWindowRecorder interface {
+	RecordBlock(testName, blockHash string, start, end time.Time)
+}
+
 // ExecuteOptions contains options for test execution.
 type ExecuteOptions struct {
 	EngineEndpoint                string
@@ -109,6 +115,7 @@ type ExecuteOptions struct {
 	ClientRPCRollbackSpec         *clientpkg.RPCRollbackSpec            // Client-specific rollback method and param format.
 	Tests                         []*TestWithSteps                      // Optional subset of tests to run (nil = run all).
 	BlockLogCollector             BlockLogCollector                     // Optional collector for capturing block logs from client.
+	BlockWindowRecorder           BlockWindowRecorder                   // Optional recorder for per-block remote metric windows.
 	RetryNewPayloadsSyncingConfig *config.RetryNewPayloadsSyncingConfig // Retry config for SYNCING responses.
 	RetryNewPayloadsFailedConfig  *config.RetryNewPayloadsFailedConfig  // Retry config for any non-SYNCING newPayload failure (RPC error, validation error, INVALID status).
 	PostTestRPCCalls              []config.PostTestRPCCall              // Arbitrary RPC calls to execute after the test step.
@@ -974,6 +981,11 @@ func (e *executor) runStepLines(
 		response, duration, fullDuration, resourceDelta, err := e.executeRPC(ctx, opts.EngineEndpoint, opts.JWT, line)
 		succeeded := err == nil
 
+		// The instant the timed call returned, held until the outcome is
+		// final. The window is reported only for a block that proved, so a
+		// timeout or a rejection never contributes a window of idle time.
+		blockEnd := time.Now()
+
 		e.log.WithFields(logrus.Fields{
 			"step":          stepName,
 			"pos":           fmt.Sprintf("%d/%d", lineNum+1, total),
@@ -1032,6 +1044,10 @@ func (e *executor) runStepLines(
 		// (RPC/network error, parse error, INVALID/INVALID_BLOCK_HASH,
 		// JSON-RPC error) takes the failed-state retry config when enabled.
 		// Non-newPayload methods are not retried.
+		// A retry proves the block again, so the timed window no longer
+		// describes the work that succeeded.
+		provedOnTheTimedCall := succeeded
+
 		if !succeeded && jsonrpc.IsBlockPayloadMethod(method) {
 			isSyncing := validationErr != nil && jsonrpc.IsSyncingError(validationErr)
 
@@ -1072,6 +1088,14 @@ func (e *executor) runStepLines(
 				"method": method,
 				"step":   stepName,
 			}).WithError(validationErr).Warn("Response validation failed")
+		}
+
+		if provedOnTheTimedCall && opts.BlockWindowRecorder != nil &&
+			jsonrpc.IsBlockPayloadMethod(method) && result != nil {
+			if blockHash, hashErr := extractBlockHash(line); hashErr == nil {
+				opts.BlockWindowRecorder.RecordBlock(result.TestFile, blockHash,
+					blockEnd.Add(-time.Duration(fullDuration)), blockEnd)
+			}
 		}
 
 		if result != nil {

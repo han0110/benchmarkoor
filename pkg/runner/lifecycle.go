@@ -25,12 +25,18 @@ import (
 	"github.com/ethpandaops/benchmarkoor/pkg/fsutil"
 	"github.com/ethpandaops/benchmarkoor/pkg/genesis"
 	"github.com/ethpandaops/benchmarkoor/pkg/podman"
+	"github.com/ethpandaops/benchmarkoor/pkg/remotemetrics"
 	"github.com/ethpandaops/benchmarkoor/pkg/version"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/sirupsen/logrus"
 )
+
+// remoteMetricsSettleTimeout bounds the wait for the readings the last block's
+// window needs. It is generous against a scrape interval measured in
+// milliseconds, and it is only ever paid once, at the end of a run.
+const remoteMetricsSettleTimeout = 5 * time.Second
 
 // runContainerLifecycle runs a single container lifecycle: load genesis,
 // create container, start, wait for RPC, execute tests, stop.
@@ -1408,6 +1414,7 @@ func (r *runner) runContainerLifecycle(
 				),
 				Tests:                         params.Tests,
 				BlockLogCollector:             params.BlockLogCollector,
+				BlockWindowRecorder:           blockWindowRecorder(params.RemoteMetrics),
 				RetryNewPayloadsSyncingConfig: r.cfg.FullConfig.GetRetryNewPayloadsSyncingState(instance),
 				RetryNewPayloadsFailedConfig:  r.cfg.FullConfig.GetRetryNewPayloadsFailedState(instance),
 				PostTestRPCCalls:              r.cfg.FullConfig.GetPostTestRPCCalls(instance),
@@ -1534,6 +1541,33 @@ func (r *runner) runContainerLifecycle(
 
 	if params.LiveState != nil {
 		params.LiveState.SetConfig(runConfig)
+	}
+
+	// Write remote metric windows if any were recorded. The final block's
+	// window still waits for a reading past its end, so let it arrive.
+	if params.RemoteMetrics != nil {
+		params.RemoteMetrics.Settle(remoteMetricsSettleTimeout)
+	}
+
+	if params.RemoteMetrics != nil && params.RemoteMetrics.Blocks() > 0 {
+		path := filepath.Join(runResultsDir, remotemetrics.ArtifactName)
+		if err := params.RemoteMetrics.Write(path); err != nil {
+			log.WithError(err).Warn("Failed to write remote metrics result")
+		} else {
+			if r.cfg.ResultsOwner != nil {
+				fsutil.Chown(path, r.cfg.ResultsOwner)
+			}
+
+			log.WithFields(logrus.Fields{
+				"blocks":  params.RemoteMetrics.Blocks(),
+				"dropped": params.RemoteMetrics.Dropped(),
+			}).Info("Remote metrics written")
+		}
+	} else if params.RemoteMetrics != nil {
+		// Enabled but empty. Saying so is what separates an unreachable
+		// endpoint from a run that simply had the feature switched off.
+		log.WithField("dropped", params.RemoteMetrics.Dropped()).
+			Warn("Remote metrics collected no windows")
 	}
 
 	// Write block logs if any were captured.

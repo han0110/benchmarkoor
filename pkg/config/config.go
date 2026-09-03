@@ -633,6 +633,7 @@ type RunnerConfig struct {
 	CPUSysfsPath       string               `yaml:"cpu_sysfs_path,omitempty" mapstructure:"cpu_sysfs_path"`
 	GitHubToken        string               `yaml:"github_token,omitempty" mapstructure:"github_token"`
 	LiveReporting      *LiveReportingConfig `yaml:"live_reporting,omitempty" mapstructure:"live_reporting"`
+	RemoteMetrics      *RemoteMetricsConfig `yaml:"remote_metrics,omitempty" mapstructure:"remote_metrics"`
 	Benchmark          BenchmarkConfig      `yaml:"benchmark" mapstructure:"benchmark"`
 	Client             ClientConfig         `yaml:"client" mapstructure:"client"`
 	Instances          []ClientInstance     `yaml:"instances" mapstructure:"instances"`

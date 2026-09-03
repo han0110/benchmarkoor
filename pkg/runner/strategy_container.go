@@ -900,6 +900,7 @@ func (r *runner) runTestsWithContainerStrategy(
 			),
 			Tests:                         []*executor.TestWithSteps{test},
 			BlockLogCollector:             params.BlockLogCollector,
+			BlockWindowRecorder:           blockWindowRecorder(params.RemoteMetrics),
 			RetryNewPayloadsSyncingConfig: r.cfg.FullConfig.GetRetryNewPayloadsSyncingState(params.Instance),
 			RetryNewPayloadsFailedConfig:  r.cfg.FullConfig.GetRetryNewPayloadsFailedState(params.Instance),
 			PostTestRPCCalls:              r.cfg.FullConfig.GetPostTestRPCCalls(params.Instance),

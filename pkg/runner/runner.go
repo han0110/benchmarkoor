@@ -21,6 +21,7 @@ import (
 	"github.com/ethpandaops/benchmarkoor/pkg/executor"
 	"github.com/ethpandaops/benchmarkoor/pkg/fsutil"
 	"github.com/ethpandaops/benchmarkoor/pkg/livereport"
+	"github.com/ethpandaops/benchmarkoor/pkg/remotemetrics"
 	"github.com/ethpandaops/benchmarkoor/pkg/upload"
 	"github.com/ethpandaops/benchmarkoor/pkg/version"
 	"github.com/sirupsen/logrus"
@@ -381,8 +382,19 @@ type containerRunParams struct {
 	DataDirCfg           *config.DataDirConfig     // Resolved datadir config (nil if not using datadir).
 	UseDataDir           bool                      // Whether a pre-populated datadir is used.
 	BlockLogCollector    blocklog.Collector        // Optional collector for capturing block logs.
+	RemoteMetrics        *remotemetrics.Collector  // Optional collector for per-block remote metric windows.
 	AccumulatedTestCount *TestCounts               // Shared across genesis groups for accumulation.
 	LiveState            *liveRunState             // Optional: live status state shared with the reporter goroutine.
+}
+
+// blockWindowRecorder keeps an absent collector out of the executor's
+// optional interface field, where a typed nil pointer would read as present.
+func blockWindowRecorder(collector *remotemetrics.Collector) executor.BlockWindowRecorder {
+	if collector == nil {
+		return nil
+	}
+
+	return collector
 }
 
 // liveRunState is a tiny mutable snapshot of run state shared between the
@@ -599,6 +611,47 @@ func (r *runner) RunInstance(ctx context.Context, instance *config.ClientInstanc
 	// status transitions into it.
 	liveState := &liveRunState{status: RunStatusRunning}
 
+	// Scrape remote metric endpoints for the lifetime of the run. The
+	// collector cuts a window for every block the executor times, and the
+	// artifact is written beside the other results when the run ends.
+	var remoteMetrics *remotemetrics.Collector
+
+	if r.cfg.FullConfig != nil && r.cfg.FullConfig.Runner.RemoteMetrics.IsEnabled() {
+		rmCfg := r.cfg.FullConfig.Runner.RemoteMetrics
+		if err := rmCfg.Validate(); err != nil {
+			return err
+		}
+
+		endpoints := make([]remotemetrics.Endpoint, 0, len(rmCfg.Endpoints))
+
+		for _, endpoint := range rmCfg.Endpoints {
+			endpoints = append(endpoints, remotemetrics.Endpoint{
+				Name:   endpoint.Name,
+				URL:    endpoint.URL,
+				Labels: endpoint.Labels,
+			})
+		}
+
+		scraper := remotemetrics.NewScraper(endpoints, rmCfg.GetInterval(), rmCfg.GetTimeout())
+		remoteMetrics = remotemetrics.NewCollector(scraper)
+
+		scrapeCtx, stopScraping := context.WithCancel(ctx)
+		go scraper.Run(scrapeCtx)
+
+		defer func() {
+			stopScraping()
+
+			if failures := scraper.Failures(); failures > 0 {
+				r.logger.WithField("failures", failures).Warn("Remote metric scrapes failed")
+			}
+		}()
+	} else if r.cfg.FullConfig != nil && r.cfg.FullConfig.Runner.RemoteMetrics != nil &&
+		r.cfg.FullConfig.Runner.RemoteMetrics.Enabled {
+		// Switched on but with nothing to scrape. Saying so is what separates
+		// a mistake in the config from the feature being off.
+		r.logger.Warn("Remote metrics enabled with no endpoints configured")
+	}
+
 	var reporter livereport.Reporter
 
 	if r.cfg.FullConfig != nil &&
@@ -720,6 +773,7 @@ func (r *runner) RunInstance(ctx context.Context, instance *config.ClientInstanc
 						ImageDigest:          imageDigest,
 						AccumulatedTestCount: accumulatedTestCounts,
 						LiveState:            liveState,
+						RemoteMetrics:        remoteMetrics,
 					}
 
 					if err := r.runContainerLifecycle(
@@ -759,6 +813,7 @@ func (r *runner) RunInstance(ctx context.Context, instance *config.ClientInstanc
 		ImageName:       imageName,
 		ImageDigest:     imageDigest,
 		LiveState:       liveState,
+		RemoteMetrics:   remoteMetrics,
 	}
 
 	return r.runContainerLifecycle(

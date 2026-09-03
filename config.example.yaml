@@ -60,6 +60,23 @@ runner:
   #   logs_enabled: true     # default true; set false to disable entirely
   #   logs_interval: 200ms   # file-tail push cadence while streaming
 
+  # Optional: scrape Prometheus text endpoints while the run executes and
+  # record a reduced window for every block. Counters are subtracted over the
+  # window and gauges are averaged, using the type each series declares, so
+  # any exporter works. A GPU exporter and a stock node exporter are both
+  # just endpoints. Results land in result.device-metrics.json.
+  # remote_metrics:
+  #   enabled: true
+  #   interval: 100ms   # default 100ms; raise it if scraping costs test time
+  #   timeout: 2s       # default 2s; bounds one request so a stalled
+  #                     # endpoint cannot delay the poll loop
+  #   endpoints:
+  #     # name must not be a hostname, because results are published.
+  #     - name: node1
+  #       url: http://10.0.0.1:9401/metrics
+  #       labels:
+  #         node: node1
+
   benchmark:
     results_dir: ${RESULTS_DIR:-./results}
     # Optional: Set ownership (user:group) for results files. Useful when running as root.
