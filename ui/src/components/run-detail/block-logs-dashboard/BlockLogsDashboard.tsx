@@ -19,6 +19,8 @@ interface BlockLogsDashboardProps {
   searchQuery?: string
   fullscreen?: boolean
   onFullscreenChange?: (fullscreen: boolean) => void
+  /** True when the run's client proves blocks rather than executing them. */
+  isProving?: boolean
 }
 
 function useDarkMode() {
@@ -61,7 +63,7 @@ function useFullscreen(
   return { fullscreen, setFullscreen }
 }
 
-export function BlockLogsDashboard({ blockLogs, runId, suiteTests, onTestClick, searchQuery = '', fullscreen: externalFullscreen, onFullscreenChange }: BlockLogsDashboardProps) {
+export function BlockLogsDashboard({ blockLogs, runId, suiteTests, onTestClick, searchQuery = '', fullscreen: externalFullscreen, onFullscreenChange, isProving = false }: BlockLogsDashboardProps) {
   const isDark = useDarkMode()
   const { fullscreen, setFullscreen } = useFullscreen(externalFullscreen, onFullscreenChange)
   const { state, updateState } = useDashboardState(runId)
@@ -72,7 +74,7 @@ export function BlockLogsDashboard({ blockLogs, runId, suiteTests, onTestClick, 
     return new Map(suiteTests.map((test, index) => [test.name, index + 1]))
   }, [suiteTests])
 
-  const { data, stats } = useProcessedData(blockLogs, state, executionOrder, searchQuery)
+  const { data, stats, timeLabel } = useProcessedData(blockLogs, state, executionOrder, searchQuery, isProving)
 
   // Don't render if no block logs data
   if (!blockLogs || Object.keys(blockLogs).length === 0) {
@@ -132,6 +134,7 @@ export function BlockLogsDashboard({ blockLogs, runId, suiteTests, onTestClick, 
             isDark={isDark}
             useLogScale={state.useLogScale}
             onTestClick={onTestClick}
+            timeLabel={timeLabel}
           />
         </TabPanel>
         <TabPanel>
@@ -158,6 +161,8 @@ export function BlockLogsDashboard({ blockLogs, runId, suiteTests, onTestClick, 
         state={state}
         onUpdate={updateState}
         onTestClick={onTestClick}
+        timeLabel={timeLabel}
+        isProving={isProving}
       />
     </>
   )

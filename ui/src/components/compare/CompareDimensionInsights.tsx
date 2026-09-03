@@ -5,6 +5,7 @@ import { parseEESTName } from '@/utils/eestName'
 import { queryTermDimension, searchQueryContains, splitQuery } from '@/utils/eestNameFilter'
 import { type StepTypeOption, getAggregatedStats } from '@/pages/RunDetailPage'
 import { type CompareRun, type LabelMode, RUN_SLOTS, formatRunLabel } from './constants'
+import { getClientLogoUrl } from '@/utils/client-colors'
 
 interface CompareDimensionInsightsProps {
   runs: CompareRun[]
@@ -335,7 +336,7 @@ export function CompareDimensionInsights({
               <div key={i} className="grid grid-cols-[8rem_1fr_auto_3rem] items-center gap-2">
                 <span className="flex min-w-0 items-center gap-1 text-[10px]/4 text-gray-500 dark:text-gray-400" title={formatRunLabel(slot, runs[i], labelMode)}>
                   <img
-                    src={`/img/clients/${runs[i].config.instance.client}.jpg`}
+                    src={getClientLogoUrl(runs[i].config.instance.client)}
                     alt={runs[i].config.instance.client}
                     className="size-3.5 shrink-0 rounded-full object-cover"
                   />
@@ -509,7 +510,7 @@ export function CompareDimensionInsights({
                       >
                         <span className="inline-flex items-center gap-1">
                           <img
-                            src={`/img/clients/${run.config.instance.client}.jpg`}
+                            src={getClientLogoUrl(run.config.instance.client)}
                             alt={run.config.instance.client}
                             className="size-3.5 rounded-full object-cover"
                           />
@@ -533,7 +534,7 @@ export function CompareDimensionInsights({
                         <span className="inline-flex items-center gap-1">
                           <span>Δ</span>
                           <img
-                            src={`/img/clients/${run.config.instance.client}.jpg`}
+                            src={getClientLogoUrl(run.config.instance.client)}
                             alt={run.config.instance.client}
                             className="size-3.5 rounded-full object-cover"
                           />

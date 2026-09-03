@@ -10,6 +10,8 @@ interface OverviewTabProps {
   isDark: boolean
   useLogScale: boolean
   onTestClick?: (testName: string) => void
+  /** Names the measured time, "Execution" or "Proving". */
+  timeLabel: string
 }
 
 interface StatCardProps {
@@ -28,7 +30,7 @@ function StatCard({ label, value, subValue }: StatCardProps) {
   )
 }
 
-export function OverviewTab({ data, stats, isDark, useLogScale, onTestClick }: OverviewTabProps) {
+export function OverviewTab({ data, stats, isDark, useLogScale, onTestClick, timeLabel }: OverviewTabProps) {
   const activeCategories = useMemo<TestCategory[]>(() =>
     ALL_CATEGORIES.filter(cat => (stats?.categoryBreakdown[cat] ?? 0) > 0),
     [stats]
@@ -64,7 +66,7 @@ export function OverviewTab({ data, stats, isDark, useLogScale, onTestClick }: O
           value={`${stats.medianThroughput.toFixed(1)} MGas/s`}
         />
         <StatCard
-          label="Avg Execution"
+          label={`Avg ${timeLabel}`}
           value={`${stats.avgExecution.toFixed(2)}ms`}
         />
       </div>
@@ -72,10 +74,10 @@ export function OverviewTab({ data, stats, isDark, useLogScale, onTestClick }: O
       {/* Charts */}
       <div className="flex flex-col gap-6">
         <div className="rounded-sm border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <ThroughputBarChart data={data} isDark={isDark} useLogScale={useLogScale} onTestClick={onTestClick} activeCategories={activeCategories} />
+          <ThroughputBarChart data={data} isDark={isDark} useLogScale={useLogScale} onTestClick={onTestClick} activeCategories={activeCategories} timeLabel={timeLabel} />
         </div>
         <div className="rounded-sm border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <ThroughputScatterChart data={data} isDark={isDark} useLogScale={useLogScale} onTestClick={onTestClick} activeCategories={activeCategories} />
+          <ThroughputScatterChart data={data} isDark={isDark} useLogScale={useLogScale} onTestClick={onTestClick} activeCategories={activeCategories} timeLabel={timeLabel} />
         </div>
       </div>
     </div>

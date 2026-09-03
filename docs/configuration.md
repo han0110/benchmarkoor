@@ -145,6 +145,7 @@ runner:
 | `container_network` | string | `benchmarkoor` | Container network name |
 | `cleanup_on_start` | bool | `false` | Remove leftover containers/networks on startup |
 | `run_timeout` | string | - | Global timeout for the entire run covering all instances, setup, and teardown. Uses Go duration format (e.g., `4h`, `30m`). See [Runner Run Timeout](#runner-run-timeout) |
+| `ready_timeout` | string | `120s` | Timeout for waiting for a client's RPC to become ready after container start. Uses Go duration format. Raise it for clients that open their RPC port only after slow internal setup |
 | `directories.tmp_datadir` | string | system temp | Directory for temporary datadir copies. (The shared cache dir is `global.directories.cachedir`.) |
 | `drop_caches_path` | string | `/proc/sys/vm/drop_caches` | Path to Linux drop_caches file (for containerized environments) |
 | `cpu_sysfs_path` | string | `/sys/devices/system/cpu` | Base path for CPU sysfs files (for containerized environments where `/sys` is read-only and the host path is bind-mounted elsewhere, e.g., `/host_sys_cpu`) |

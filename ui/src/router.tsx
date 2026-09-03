@@ -113,4 +113,4 @@ const routeTree = rootRoute.addChildren([
   queryRoute,
 ])
 
-export const router = createRouter({ routeTree })
+export const router = createRouter({ routeTree, basepath: import.meta.env.BASE_URL })

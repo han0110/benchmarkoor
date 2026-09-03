@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/ethpandaops/benchmarkoor/pkg/fsutil"
+	"github.com/ethpandaops/benchmarkoor/pkg/jsonrpc"
 )
 
 // testNameMarker is the file written into each per-test result directory holding
@@ -329,8 +330,8 @@ func (r *TestResult) AddResult(
 		r.MethodDiskWriteOps[method] = append(r.MethodDiskWriteOps[method], int64(resources.DiskWriteOps))
 	}
 
-	// Calculate MGas/s for successful engine_newPayload calls.
-	if succeeded && strings.HasPrefix(method, "engine_newPayload") {
+	// Calculate MGas/s for successful block payload calls.
+	if succeeded && jsonrpc.IsBlockPayloadMethod(method) {
 		if gasUsed, err := extractGasUsed(request); err == nil && elapsed > 0 {
 			r.GasUsed[pos] = gasUsed
 			mgasPerSec := float64(gasUsed) * 1000 / float64(elapsed)

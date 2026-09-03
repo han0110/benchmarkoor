@@ -62,7 +62,7 @@ function CopyButton({ text }: { text: string }) {
 
 // --- Entry generators ---
 
-const GENERAL_FILES = ['benchmarkoor.log', 'container.log', 'config.json', 'result.json'] as const
+const GENERAL_FILES = ['benchmarkoor.log', 'container.log', 'config.json', 'result.json', 'result.block-logs.json'] as const
 
 function buildGeneralEntries(runId: string): FileEntry[] {
   return GENERAL_FILES.map((filename) => ({
@@ -781,7 +781,7 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, showDownloadList, d
             <div className="flex flex-col gap-1.5">
               {requiresAuth && runtimeConfig?.api?.baseUrl && (
                 <p className="text-xs/5 text-amber-600 dark:text-amber-400">
-                  Authentication is required. Set <code className="rounded-xs bg-gray-100 px-1 py-0.5 font-mono dark:bg-gray-900">BENCHMARKOOR_API_KEY</code> to a key generated from your <a href="/api-keys" target="_blank" rel="noopener noreferrer" className="underline">API Keys</a> page.
+                  Authentication is required. Set <code className="rounded-xs bg-gray-100 px-1 py-0.5 font-mono dark:bg-gray-900">BENCHMARKOOR_API_KEY</code> to a key generated from your <a href={`${import.meta.env.BASE_URL}api-keys`} target="_blank" rel="noopener noreferrer" className="underline">API Keys</a> page.
                 </p>
               )}
               <p className="text-xs/5 text-gray-500 dark:text-gray-400">

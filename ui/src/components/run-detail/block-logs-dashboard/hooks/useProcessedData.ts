@@ -4,12 +4,14 @@ import type { ProcessedTestData, DashboardState, DashboardStats } from '../types
 import { parseCategory } from '../utils/categoryParser'
 import { percentile, removeOutliers, countOutliers, normalizeValue, emptyCategoryBreakdown } from '../utils/statistics'
 import { compileQuery } from '@/utils/eestNameFilter'
+import { measuredTimeLabel, measuredTimeMs } from '@/utils/blockLogs'
 
 export function useProcessedData(
   blockLogs: BlockLogs | null | undefined,
   state: DashboardState,
   executionOrder: Map<string, number>,
-  searchQuery: string = ''
+  searchQuery: string = '',
+  isProving: boolean = false
 ) {
   return useMemo(() => {
     if (!blockLogs || Object.keys(blockLogs).length === 0) {
@@ -17,8 +19,11 @@ export function useProcessedData(
         data: [],
         stats: null,
         allData: [],
+        timeLabel: 'Execution',
       }
     }
+
+    const timeLabel = measuredTimeLabel(isProving)
 
     // Transform raw block logs to processed data
     let data: ProcessedTestData[] = Object.entries(blockLogs).map(([testName, entry]) => {
@@ -32,7 +37,7 @@ export function useProcessedData(
         testOrder: executionOrder.get(testName) ?? Infinity,
         category: parseCategory(testName),
         throughput: entry.throughput?.mgas_per_sec ?? 0,
-        executionMs: entry.timing?.execution_ms ?? 0,
+        executionMs: measuredTimeMs(entry, isProving),
         totalMs: entry.timing?.total_ms ?? 0,
         overheadMs,
         stateReadMs,
@@ -47,8 +52,10 @@ export function useProcessedData(
         storageCacheMisses: entry.cache?.storage?.misses ?? 0,
         codeCacheHits: entry.cache?.code?.hits ?? 0,
         codeCacheMisses: entry.cache?.code?.misses ?? 0,
-        gasUsed: entry.block.gas_used,
-        txCount: entry.block.tx_count,
+        gasUsed: entry.block.gas_used ?? 0,
+        txCount: entry.block.tx_count ?? 0,
+        statelessInputSize: entry.statelessInputSize,
+        proofSize: entry.proofSize,
         // Normalized values will be calculated after filtering
         normalizedThroughput: 0,
         normalizedSpeed: 0,
@@ -156,6 +163,12 @@ export function useProcessedData(
         case 'gas':
           comparison = a.gasUsed - b.gasUsed
           break
+        case 'statelessInput':
+          comparison = (a.statelessInputSize ?? 0) - (b.statelessInputSize ?? 0)
+          break
+        case 'proof':
+          comparison = (a.proofSize ?? 0) - (b.proofSize ?? 0)
+          break
       }
       return state.sortOrder === 'asc' ? comparison : -comparison
     })
@@ -199,6 +212,7 @@ export function useProcessedData(
       data,
       stats,
       allData,
+      timeLabel,
     }
-  }, [blockLogs, state.categories, state.minThroughput, state.maxThroughput, state.excludeOutliers, state.sortBy, state.sortOrder, executionOrder, searchQuery])
+  }, [blockLogs, state.categories, state.minThroughput, state.maxThroughput, state.excludeOutliers, state.sortBy, state.sortOrder, executionOrder, searchQuery, isProving])
 }

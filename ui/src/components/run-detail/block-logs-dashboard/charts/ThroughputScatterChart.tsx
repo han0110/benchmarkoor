@@ -11,6 +11,8 @@ interface ThroughputScatterChartProps {
   useLogScale: boolean
   onTestClick?: (testName: string) => void
   activeCategories?: TestCategory[]
+  /** Names the measured time, "Execution" or "Proving". */
+  timeLabel: string
 }
 
 function formatGas(gas: number): string {
@@ -26,7 +28,7 @@ function formatGas(gas: number): string {
   return `${gas} Gas`
 }
 
-export function ThroughputScatterChart({ data, isDark, useLogScale, onTestClick, activeCategories }: ThroughputScatterChartProps) {
+export function ThroughputScatterChart({ data, isDark, useLogScale, onTestClick, activeCategories, timeLabel }: ThroughputScatterChartProps) {
   const { mode: nameMode } = useNameDisplayMode()
   const categoriesToShow = activeCategories ?? ALL_CATEGORIES
   const textColor = isDark ? '#e5e7eb' : '#374151'
@@ -82,7 +84,7 @@ export function ThroughputScatterChart({ data, isDark, useLogScale, onTestClick,
             <strong>Test ${testLabel}</strong><br/>
             <span style="font-size: 11px; color: ${isDark ? '#9ca3af' : '#6b7280'}; word-break: break-all; display: block;">${formatTestNameLong(item.testName, nameMode)}</span><br/>
             Throughput: ${item.throughput.toFixed(2)} MGas/s<br/>
-            Execution: ${item.executionMs.toFixed(2)}ms<br/>
+            ${timeLabel}: ${item.executionMs.toFixed(2)}ms<br/>
             Gas Used: ${formatGas(item.gasUsed)}<br/>
             Overhead: ${item.overheadMs.toFixed(2)}ms<br/>
             <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background-color:${CATEGORY_COLORS[item.category]};margin-right:6px;vertical-align:middle;"></span>${item.category.charAt(0).toUpperCase() + item.category.slice(1)}
@@ -105,7 +107,7 @@ export function ThroughputScatterChart({ data, isDark, useLogScale, onTestClick,
       },
       xAxis: {
         type: useLogScale ? ('log' as const) : ('value' as const),
-        name: 'Execution Time (ms)',
+        name: `${timeLabel} Time (ms)`,
         nameLocation: 'middle' as const,
         nameGap: 25,
         nameTextStyle: { color: subTextColor, fontSize: 11 },
@@ -145,7 +147,7 @@ export function ThroughputScatterChart({ data, isDark, useLogScale, onTestClick,
       ],
       series: seriesData,
     }
-  }, [data, isDark, useLogScale, textColor, subTextColor, gridColor, tooltipBg, tooltipBorder, categoriesToShow, nameMode])
+  }, [data, isDark, useLogScale, textColor, subTextColor, gridColor, tooltipBg, tooltipBorder, categoriesToShow, nameMode, timeLabel])
 
   const onEvents = useMemo(() => {
     if (!onTestClick) return undefined
@@ -161,7 +163,7 @@ export function ThroughputScatterChart({ data, isDark, useLogScale, onTestClick,
   return (
     <div className="flex flex-col gap-2">
       <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100">
-        Execution Time vs Throughput <span className="text-xs font-normal text-gray-500 dark:text-gray-400">(bubble size = gas used)</span>
+        {timeLabel} Time vs Throughput <span className="text-xs font-normal text-gray-500 dark:text-gray-400">(bubble size = gas used)</span>
       </h4>
       <ReactECharts
         option={option}

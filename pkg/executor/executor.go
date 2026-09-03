@@ -940,7 +940,7 @@ func (e *executor) runStepLines(
 		if skipping {
 			drop := true
 
-			if strings.HasPrefix(method, "engine_newPayload") {
+			if jsonrpc.IsBlockPayloadMethod(method) {
 				if bn, ok := extractBlockNumber(line); ok && bn > opts.SkipUntilBlockNumber {
 					skipping = false
 					drop = false
@@ -962,8 +962,8 @@ func (e *executor) runStepLines(
 			}
 		}
 
-		// Register blockHash BEFORE the RPC call for engine_newPayload methods.
-		if captureBlockLogs && strings.HasPrefix(method, "engine_newPayload") &&
+		// Register blockHash BEFORE the RPC call for block payload methods.
+		if captureBlockLogs && jsonrpc.IsBlockPayloadMethod(method) &&
 			opts.BlockLogCollector != nil && result != nil {
 			if blockHash, hashErr := extractBlockHash(line); hashErr == nil {
 				opts.BlockLogCollector.RegisterBlockHash(result.TestFile, blockHash)
@@ -1032,7 +1032,7 @@ func (e *executor) runStepLines(
 		// (RPC/network error, parse error, INVALID/INVALID_BLOCK_HASH,
 		// JSON-RPC error) takes the failed-state retry config when enabled.
 		// Non-newPayload methods are not retried.
-		if !succeeded && strings.HasPrefix(method, "engine_newPayload") {
+		if !succeeded && jsonrpc.IsBlockPayloadMethod(method) {
 			isSyncing := validationErr != nil && jsonrpc.IsSyncingError(validationErr)
 
 			switch {

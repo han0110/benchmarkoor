@@ -13,6 +13,7 @@ import {
 import clsx from 'clsx'
 import { useLiveRunLogsWS } from '@/api/hooks/useLiveRunLogsWS'
 import { AnsiLine } from '@/components/shared/AnsiLine'
+import { getClientLogoUrl } from '@/utils/client-colors'
 
 interface LiveRunLogPanelProps {
   runId: string
@@ -323,7 +324,7 @@ export function LiveRunLogPanel({ runId, client, instanceId }: LiveRunLogPanelPr
           <>
             <span className="text-gray-300 dark:text-gray-600">·</span>
             <img
-              src={`/img/clients/${client}.jpg`}
+              src={getClientLogoUrl(client)}
               alt={`${client} logo`}
               className="size-5 shrink-0 rounded-xs object-cover"
             />

@@ -111,6 +111,37 @@ export function SourceBadge({ source, label }: SourceBadgeProps) {
     )
   }
 
+  if (source.eest) {
+    const { github_repo, github_release, fixtures_url, local_fixtures_dir } = source.eest
+
+    if (github_repo && github_release) {
+      const url = `${getGitHubUrl(github_repo)}/releases/tag/${encodeURIComponent(github_release)}`
+
+      return (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`${github_repo} @ ${github_release}`}
+          className="inline-flex items-center gap-1.5 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+        >
+          <GitHubIcon className="size-4" />
+          {label && <span className="text-xs/5">{label}</span>}
+        </a>
+      )
+    }
+
+    return (
+      <span
+        title={local_fixtures_dir || fixtures_url || 'EEST fixtures'}
+        className="inline-flex items-center gap-1.5 text-gray-600 dark:text-gray-400"
+      >
+        <FolderIcon className="size-4" />
+        {label && <span className="text-xs/5">{label}</span>}
+      </span>
+    )
+  }
+
   return null
 }
 

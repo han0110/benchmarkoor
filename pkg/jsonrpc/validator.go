@@ -9,6 +9,13 @@ import (
 // ErrNewPayloadSyncing is returned when engine_newPayload returns SYNCING status.
 var ErrNewPayloadSyncing = errors.New("newPayload status is SYNCING")
 
+// IsBlockPayloadMethod reports whether a method submits a block payload whose
+// gas, block hash, and payload status are recorded.
+func IsBlockPayloadMethod(method string) bool {
+	return strings.HasPrefix(method, "engine_newPayload") ||
+		strings.HasPrefix(method, "engine_proveStatelessValidator")
+}
+
 // IsSyncingError checks if the error is a SYNCING status error.
 func IsSyncingError(err error) bool {
 	return errors.Is(err, ErrNewPayloadSyncing)
@@ -36,7 +43,7 @@ type NewPayloadValidator struct{}
 
 // Validate checks if engine_newPayload responses have VALID status.
 func (v *NewPayloadValidator) Validate(method string, resp *Response) error {
-	if !strings.HasPrefix(method, "engine_newPayload") {
+	if !IsBlockPayloadMethod(method) {
 		return nil
 	}
 

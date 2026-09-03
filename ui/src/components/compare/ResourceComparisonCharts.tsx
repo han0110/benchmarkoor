@@ -17,6 +17,7 @@ import {
   type ResourceStep,
   type StepResource,
 } from '@/utils/resourceStep'
+import { getClientLogoUrl } from '@/utils/client-colors'
 
 // stepResource normalises a per-test-result step into the shared helper's input.
 function stepResource(step?: StepResult): StepResource | undefined {
@@ -89,32 +90,41 @@ function formatOps(ops: number): string {
   return `${(ops / 1_000_000).toFixed(1)}M`
 }
 
-function buildDataPoints(tests: Record<string, TestEntry>, resStep: ResourceStep, nameFilter?: (name: string) => boolean, suiteTests?: SuiteTest[]): ResourceDataPoint[] {
+/** Map every run onto one test list, so a test missing from one run leaves a gap rather than shifting its remaining points. */
+function buildDataPoints(runs: CompareRun[], resStep: ResourceStep, nameFilter?: (name: string) => boolean, suiteTests?: SuiteTest[]): { unifiedTests: [string, number][]; pointsPerRun: (ResourceDataPoint | null)[][] } {
   const suiteOrder = new Map<string, number>()
   if (suiteTests) {
     suiteTests.forEach((t, i) => suiteOrder.set(t.name, i + 1))
   }
 
-  const sortedTests = Object.entries(tests)
-    .filter(([name]) => !nameFilter || nameFilter(name))
-    .sort(([nameA, a], [nameB, b]) => {
-      const aNum = suiteOrder.get(nameA) ?? (parseInt(a.dir, 10) || 0)
-      const bNum = suiteOrder.get(nameB) ?? (parseInt(b.dir, 10) || 0)
-      return aNum - bNum
-    })
+  const orderByName = new Map<string, number>()
+  const aggPerRun = runs.map((run) => {
+    const aggByName = new Map<string, AggregatedResource>()
+    for (const [name, test] of Object.entries(run.result?.tests ?? {})) {
+      if (nameFilter && !nameFilter(name)) continue
+      const agg = getAggregatedResourceData(test, resStep)
+      if (!agg) continue
+      aggByName.set(name, agg)
+      if (!orderByName.has(name)) orderByName.set(name, suiteOrder.get(name) ?? (parseInt(test.dir, 10) || 0))
+    }
+    return aggByName
+  })
 
-  const points: ResourceDataPoint[] = []
-  sortedTests.forEach(([testName, test], index) => {
-    const agg = getAggregatedResourceData(test, resStep)
-    if (agg) {
+  const unifiedTests = [...orderByName]
+    .sort((a, b) => a[1] - b[1])
+    .map(([name, order], i): [string, number] => [name, order || i + 1])
+  const pointsPerRun = aggPerRun.map((aggByName) =>
+    unifiedTests.map(([testName, order], index) => {
+      const agg = aggByName.get(testName)
+      if (!agg) return null
       const res = agg.totals
       let cpuPercent = 0
       if (agg.timeTotalNs > 0) {
         cpuPercent = ((res.cpu_usec ?? 0) / (agg.timeTotalNs / 1000)) * 100
       }
-      points.push({
+      return {
         testIndex: index + 1,
-        testOrder: suiteOrder.get(testName) ?? (parseInt(test.dir, 10) || (index + 1)),
+        testOrder: order,
         testName,
         cpuPercent,
         memoryMB: agg.memoryBytes / (1024 * 1024),
@@ -124,10 +134,10 @@ function buildDataPoints(tests: Record<string, TestEntry>, resStep: ResourceStep
         diskWrite: res.disk_write_bytes ?? 0,
         diskReadOps: res.disk_read_iops ?? 0,
         diskWriteOps: res.disk_write_iops ?? 0,
-      })
-    }
-  })
-  return points
+      }
+    }),
+  )
+  return { unifiedTests, pointsPerRun }
 }
 
 interface ChartSectionProps {
@@ -187,26 +197,21 @@ export function ResourceComparisonCharts({ runs, labelMode, testNameFilter, suit
     }
   }, [onZoomChange])
 
-  const pointsPerRun = useMemo(
-    () => runs.map((r) => r.result ? buildDataPoints(r.result.tests, resStep, testNameFilter, suiteTests) : []),
+  const { unifiedTests, pointsPerRun } = useMemo(
+    () => buildDataPoints(runs, resStep, testNameFilter, suiteTests),
     [runs, resStep, testNameFilter, suiteTests],
   )
 
   const highlightedTestRef = useRef<string | null>(null)
 
-  const hasData = pointsPerRun.some((p) => p.length > 0)
+  const hasData = pointsPerRun.some((p) => p.some((d) => d !== null))
 
   const chartOptions = useMemo(() => {
     const textColor = isDark ? '#ffffff' : '#374151'
     const axisLineColor = isDark ? '#4b5563' : '#d1d5db'
     const splitLineColor = isDark ? '#374151' : '#e5e7eb'
-    const maxLen = Math.max(...pointsPerRun.map((p) => p.length))
-    const indexToOrder = new Map<number, number>()
-    for (const points of pointsPerRun) {
-      for (const d of points) {
-        indexToOrder.set(d.testIndex, d.testOrder)
-      }
-    }
+    const maxLen = unifiedTests.length
+    const indexToOrder = new Map(unifiedTests.map(([, order], i) => [i + 1, order]))
 
     const baseConfig = {
       backgroundColor: 'transparent',
@@ -270,6 +275,7 @@ export function ResourceComparisonCharts({ runs, labelMode, testNameFilter, suit
       if (chartType === 'dot') return { type: 'scatter' as const, symbolSize: 4 }
       return {
         type: 'line' as const,
+        connectNulls: false,
         smooth: maxLen <= 100,
         showSymbol: maxLen <= 100,
         symbolSize: 4,
@@ -297,19 +303,20 @@ export function ResourceComparisonCharts({ runs, labelMode, testNameFilter, suit
       textStyle: { color: textColor },
       extraCssText: 'max-width: 300px; white-space: normal;',
       formatter: (
-        params: Array<{ seriesName: string; color: string; value: [number, number, string, number] }>,
+        params: Array<{ seriesName: string; color: string; value: [number, number | null, string, number] }>,
       ) => {
-        if (!params.length) return ''
-        const testName = params[0].value[2]
-        const testOrder = params[0].value[3]
+        const visible = params.filter((p) => p.value[1] != null)
+        if (!visible.length) return ''
+        const testName = visible[0].value[2]
+        const testOrder = visible[0].value[3]
         highlightedTestRef.current = testName
         let content = `<strong>Test #${testOrder}</strong>`
         if (testName) content += `<br/><span style="font-size: 10px; color: ${isDark ? '#9ca3af' : '#6b7280'};">${formatTestNameLong(testName, nameMode)}</span>`
         content += '<br/>'
-        params.forEach((p) => {
-          const value = p.value[1]
+        visible.forEach((p) => {
+          const value = p.value[1] as number
           const client = clientBySeriesName.get(p.seriesName)
-          const clientImg = client ? `<img src="/img/clients/${client}.jpg" style="display:inline-block;width:14px;height:14px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;" />` : ''
+          const clientImg = client ? `<img src="${getClientLogoUrl(client)}" style="display:inline-block;width:14px;height:14px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;" />` : ''
           content += `${clientImg}<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background-color:${p.color};margin-right:6px;vertical-align:middle;"></span>${p.seriesName}: ${formatter(value)}<br/>`
         })
         return content
@@ -332,7 +339,7 @@ export function ResourceComparisonCharts({ runs, labelMode, testNameFilter, suit
         return {
           name: `Run ${formatRunLabel(slot, runs[i], labelMode)}`,
           ...createSeriesStyle(),
-          data: points.map((d) => [d.testIndex, d[field], d.testName, d.testOrder]),
+          data: unifiedTests.map(([testName, order], j) => [j + 1, points[j] ? points[j][field] : null, testName, order]),
           itemStyle: { color: slot.color },
           cursor: onTestClick ? 'pointer' : 'default',
           ...(chartType === 'line' ? { areaStyle: { opacity: 0.08, color: slot.color } } : {}),
@@ -396,7 +403,7 @@ export function ResourceComparisonCharts({ runs, labelMode, testNameFilter, suit
     }
 
     return { cpuPercentOption, memoryMBOption, cpuTimeOption, memoryDeltaOption, diskReadBytesOption, diskWriteBytesOption, diskReadOpsOption, diskWriteOpsOption }
-  }, [pointsPerRun, runs, isDark, zoomRange, labelMode, chartType, onTestClick, highlightedTestRef, nameMode])
+  }, [unifiedTests, pointsPerRun, runs, isDark, zoomRange, labelMode, chartType, onTestClick, highlightedTestRef, nameMode])
 
   if (!hasData) return null
 
@@ -410,7 +417,7 @@ export function ResourceComparisonCharts({ runs, labelMode, testNameFilter, suit
             const slot = RUN_SLOTS[run.index]
             return (
               <span key={slot.label} className={`inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 font-medium ${slot.badgeBgClass} ${slot.badgeTextClass}`}>
-                <img src={`/img/clients/${run.config.instance.client}.jpg`} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
+                <img src={getClientLogoUrl(run.config.instance.client)} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
                 {formatRunLabel(slot, run, labelMode)}
               </span>
             )

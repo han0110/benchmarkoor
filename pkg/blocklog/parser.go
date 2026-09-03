@@ -35,6 +35,8 @@ func NewParser(clientType client.ClientType) Parser {
 		return NewRethParser()
 	case client.ClientEthrex:
 		return NewEthrexParser()
+	case client.ClientProvoor:
+		return NewProvoorParser()
 	default:
 		return NewNoopParser()
 	}

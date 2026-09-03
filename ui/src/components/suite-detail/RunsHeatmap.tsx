@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import clsx from 'clsx'
 import { AlertTriangle, GitCompareArrows, Layers } from 'lucide-react'
@@ -9,6 +9,32 @@ import { ClientBadge } from '@/components/shared/ClientBadge'
 // Check if run completed successfully (no status = completed for backward compat)
 function isRunCompleted(run: IndexEntry): boolean {
   return !run.status || run.status === 'completed'
+}
+
+// Compare affordances navigate client side, so a statically hosted site
+// never full-page-loads a deep link. The href stays for open-in-new-tab.
+function CompareLink({ href, title, className, children }: {
+  href?: string
+  title: string
+  className: string
+  children: ReactNode
+}) {
+  const navigate = useNavigate()
+  if (!href) return null
+  return (
+    <a
+      href={href}
+      title={title}
+      className={className}
+      onClick={(e) => {
+        e.preventDefault()
+        const [to, query] = href.split('?')
+        navigate({ to, search: Object.fromEntries(new URLSearchParams(query)) })
+      }}
+    >
+      {children}
+    </a>
+  )
 }
 
 // Check if a run is still in progress (being reported by an active runner).
@@ -486,22 +512,22 @@ export function RunsHeatmap({
                 <span>{section.label}</span>
               </span>
               {getCompareGroupHref && (
-                <a
+                <CompareLink
                   href={getCompareGroupHref(section.clients.flatMap((c) => section.clientRuns[c]))}
                   className="flex shrink-0 cursor-pointer items-center justify-center rounded-xs p-1 shadow-xs ring-1 ring-inset transition-colors bg-white text-gray-500 ring-gray-300 hover:bg-gray-50 hover:text-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                   title="Compare latest successful run per client in this group"
                 >
                   <GitCompareArrows className="size-3.5" />
-                </a>
+                </CompareLink>
               )}
               {getGroupCompareGroupHref && (
-                <a
+                <CompareLink
                   href={getGroupCompareGroupHref(section.metadata, section.clients)}
                   className="flex shrink-0 cursor-pointer items-center justify-center rounded-xs p-1 shadow-xs ring-1 ring-inset transition-colors bg-white text-gray-500 ring-gray-300 hover:bg-gray-50 hover:text-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                   title="Compare averaged groups for clients in this group"
                 >
                   <Layers className="size-3.5" />
-                </a>
+                </CompareLink>
               )}
               <div className="h-px grow bg-gray-200 dark:bg-gray-700" />
             </div>
@@ -540,22 +566,22 @@ export function RunsHeatmap({
                       <ClientBadge client={client} />
                     </span>
                     {getCompareClientAcrossGroupsHref && groupSections && (
-                      <a
+                      <CompareLink
                         href={getCompareClientAcrossGroupsHref(client)}
                         className="flex shrink-0 items-center justify-center rounded-xs p-0.5 text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
                         title={`Compare latest successful ${client} run across groups`}
                       >
                         <GitCompareArrows className="size-3" />
-                      </a>
+                      </CompareLink>
                     )}
                     {getGroupCompareClientAcrossGroupsHref && groupSections && (
-                      <a
+                      <CompareLink
                         href={getGroupCompareClientAcrossGroupsHref(client)}
                         className="flex shrink-0 items-center justify-center rounded-xs p-0.5 text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
                         title={`Compare ${client} averaged across groups (group comparison)`}
                       >
                         <Layers className="size-3" />
-                      </a>
+                      </CompareLink>
                     )}
                   </div>
                   <div className="flex min-w-0 flex-1 flex-wrap gap-1">

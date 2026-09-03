@@ -8,6 +8,7 @@ import { formatTimestamp } from '@/utils/date'
 import { formatDuration } from '@/utils/format'
 import type { GroupDef } from './groupUtils'
 import { RUN_SLOTS } from './constants'
+import { getClientLogoUrl } from '@/utils/client-colors'
 
 // ── Props ────────────────────────────────────────────────────────
 
@@ -224,7 +225,7 @@ function GroupCard({
 
         {group.client && (
           <img
-            src={`/img/clients/${group.client}.jpg`}
+            src={getClientLogoUrl(group.client)}
             alt={group.client}
             className="size-6 rounded-full object-cover"
           />

@@ -706,6 +706,16 @@ export interface BlockLogEntry {
   state_reads?: BlockLogStateReads
   state_writes?: BlockLogStateWrites
   cache?: BlockLogCache
+  /**
+   * Proving time as reported by the proving cluster, distinct from the
+   * end-to-end `timing.total_ms` the forwarder measures. Only zkVM clients
+   * emit it.
+   */
+  clusterReportedProvingTimeMs?: number
+  /** Size of the stateless input proven, in bytes. Only zkVM clients emit it. */
+  statelessInputSize?: number
+  /** Size of the proof, in bytes. Only zkVM clients emit it. */
+  proofSize?: number
 }
 
 export type BlockLogs = Record<string, BlockLogEntry>

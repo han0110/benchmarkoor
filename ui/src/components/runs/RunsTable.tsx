@@ -285,10 +285,10 @@ export function RunsTable({
               <td className="whitespace-nowrap px-3 py-2 sm:px-4 sm:py-2.5">
                 <div className="flex items-center gap-2">
                   <span className="sm:hidden">
-                    <ClientBadge client={entry.instance.client} hideLabel />
+                    <ClientBadge client={entry.instance.client} metadata={entry.metadata} hideLabel />
                   </span>
                   <span className="hidden sm:inline-flex">
-                    <ClientBadge client={entry.instance.client} />
+                    <ClientBadge client={entry.instance.client} metadata={entry.metadata} />
                   </span>
                   <StrategyIcon strategy={entry.instance.rollback_strategy} />
                 </div>

@@ -25,6 +25,7 @@ import { BlockLogsComparison } from '@/components/compare/BlockLogsComparison'
 import { ConfigDiff } from '@/components/compare/ConfigDiff'
 import { type StepTypeOption, ALL_STEP_TYPES, DEFAULT_STEP_FILTER } from '@/pages/RunDetailPage'
 import { MIN_COMPARE_RUNS, MAX_COMPARE_RUNS, buildLabelModeOptions, type CompareRun, type LabelMode } from '@/components/compare/constants'
+import { isProvingRun } from '@/utils/blockLogs'
 
 function parseStepFilter(param: string | undefined): StepTypeOption[] {
   if (!param) return DEFAULT_STEP_FILTER
@@ -301,6 +302,16 @@ export function ComparePage() {
     result: resultQueries[i].data ?? null,
     index: i,
   }))
+
+  // Proving a block and executing one are different work, so their times and
+  // MGas/s share no scale and every metric below would compare quantities that
+  // only look alike. Such a set is rejected rather than charted.
+  const provingCount = runs.filter((run) => isProvingRun(run.config)).length
+  if (provingCount > 0 && provingCount < runs.length) {
+    return (
+      <ErrorState message="These runs cannot be compared: proving clients and execution clients measure different work, so their timings and throughput are not on the same scale. Compare proving runs with proving runs, or execution runs with execution runs." />
+    )
+  }
 
   const labelModeOptions = buildLabelModeOptions(runs)
 

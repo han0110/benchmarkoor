@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,9 @@ import (
 	"github.com/ethpandaops/benchmarkoor/pkg/eest"
 	"github.com/sirupsen/logrus"
 )
+
+// errTarballNotFound reports a tarball URL answering 404.
+var errTarballNotFound = errors.New("tarball not found")
 
 // EESTSource provides tests from EEST fixtures in GitHub releases or artifacts.
 type EESTSource struct {
@@ -222,11 +226,18 @@ func (s *EESTSource) downloadAndExtract(ctx context.Context, cacheBase string) e
 		return fmt.Errorf("extracting fixtures: %w", err)
 	}
 
-	// Download and extract genesis.
+	// Download and extract genesis. A release without a genesis tarball, such
+	// as a stateless fixtures release, answers 404 and the run proceeds
+	// without one; a client that does need a genesis fails its lifecycle
+	// check instead.
 	s.log.WithField("url", genesisURL).Info("Downloading genesis tarball")
 
 	if err := s.downloadAndExtractTarball(ctx, genesisURL, s.genesisDir); err != nil {
-		return fmt.Errorf("extracting genesis: %w", err)
+		if !errors.Is(err, errTarballNotFound) {
+			return fmt.Errorf("extracting genesis: %w", err)
+		}
+
+		s.log.WithField("url", genesisURL).Warn("Genesis tarball not found; continuing without genesis")
 	}
 
 	return nil
@@ -637,6 +648,10 @@ func (s *EESTSource) downloadAndExtractTarball(ctx context.Context, url, targetD
 
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("%w: %s", errTarballNotFound, url)
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
@@ -891,7 +906,10 @@ func (s *EESTSource) discoverTests() (*PreparedSource, error) {
 
 			var converted *eest.ConvertedTest
 
-			if fixture.IsStateful() {
+			switch {
+			case fixture.IsStateless():
+				converted, err = eest.ConvertStatelessFixture(name, fixture)
+			case fixture.IsStateful():
 				preRun := preRuns[fixture.StartBlockHash]
 				if preRun == nil && statefulPreRunMissing(fixture) {
 					s.log.WithFields(logrus.Fields{
@@ -904,8 +922,17 @@ func (s *EESTSource) discoverTests() (*PreparedSource, error) {
 				}
 
 				converted, err = eest.ConvertStatefulFixture(name, fixture, preRun)
-			} else {
+			default:
 				converted, err = eest.ConvertFixture(name, fixture)
+			}
+
+			if errors.Is(err, eest.ErrNoStatelessInput) {
+				s.log.WithFields(logrus.Fields{
+					"file":    path,
+					"fixture": name,
+				}).Debug("Skipping fixture whose benchmark block carries no stateless input")
+
+				continue
 			}
 
 			if err != nil {
@@ -931,6 +958,16 @@ func (s *EESTSource) discoverTests() (*PreparedSource, error) {
 			test := &TestWithSteps{
 				Name:     testName,
 				EESTInfo: fixture.Info,
+			}
+
+			// Only the benchmark block of a stateless fixture is proven, so its
+			// per-block entry holds the counts matching the measured work.
+			// Lifting it into the same field external opcode data uses keeps the
+			// suite output shaped like every other source, and drops the consumed
+			// list from the embedded _info. A later loadOpcodes still wins.
+			if counts := fixture.StatelessOpcodeCount(); counts != nil {
+				test.OpcodeCount = counts
+				fixture.Info.Metadata.OpcodeCountPerBlock = nil
 			}
 
 			// Create setup step if there are setup lines.

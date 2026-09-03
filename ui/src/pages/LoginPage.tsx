@@ -43,8 +43,8 @@ export function LoginPage() {
     <div className="flex min-h-[60vh] flex-col items-center justify-center">
       {requiresLogin && (
         <div className="mb-8 flex flex-col items-center gap-2">
-          <img src="/img/logo_black.png" alt="Benchmarkoor" className="h-28 dark:hidden" />
-          <img src="/img/logo_white.png" alt="Benchmarkoor" className="hidden h-28 dark:block" />
+          <img src={`${import.meta.env.BASE_URL}img/logo_black.png`} alt="Benchmarkoor" className="h-28 dark:hidden" />
+          <img src={`${import.meta.env.BASE_URL}img/logo_white.png`} alt="Benchmarkoor" className="hidden h-28 dark:block" />
           <span className="text-3xl font-semibold text-gray-900 dark:text-gray-100">Benchmarkoor</span>
         </div>
       )}

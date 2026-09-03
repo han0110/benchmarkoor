@@ -38,6 +38,9 @@ export interface ProcessedTestData {
   codeCacheMisses: number
   gasUsed: number
   txCount: number
+  // Stateless input and proof sizes, absent for clients that do not prove.
+  statelessInputSize?: number
+  proofSize?: number
   // Normalized 0-100 for radar chart
   normalizedThroughput: number
   normalizedSpeed: number
@@ -69,7 +72,7 @@ export interface BoxPlotStats {
 }
 
 export type DashboardTab = 'overview' | 'cache' | 'distribution'
-export type SortField = 'throughput' | 'execution' | 'overhead' | 'name' | 'order' | 'category' | 'accountCache' | 'storageCache' | 'codeCache' | 'gas'
+export type SortField = 'throughput' | 'execution' | 'overhead' | 'name' | 'order' | 'category' | 'accountCache' | 'storageCache' | 'codeCache' | 'gas' | 'statelessInput' | 'proof'
 export type SortOrder = 'asc' | 'desc'
 
 export interface DashboardState {

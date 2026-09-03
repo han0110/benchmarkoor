@@ -3,6 +3,7 @@ import clsx from 'clsx'
 import { type CompareRun, type LabelMode, buildLabelModeOptions, RUN_SLOTS, formatRunLabel } from './constants'
 import { FilterInput } from '@/components/shared/FilterInput'
 import { TEST_FILTER_HINT } from '@/utils/eestNameFilter'
+import { getClientLogoUrl } from '@/utils/client-colors'
 
 interface StickyRunBarProps {
   runs: CompareRun[]
@@ -48,7 +49,7 @@ export function StickyRunBar({ runs, sentinelRef, labelMode, onLabelModeChange, 
           const slot = RUN_SLOTS[run.index]
           return (
             <span key={slot.label} className={clsx('inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 text-xs/5 font-medium', slot.badgeBgClass, slot.badgeTextClass)}>
-              <img src={`/img/clients/${run.config.instance.client}.jpg`} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
+              <img src={getClientLogoUrl(run.config.instance.client)} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
               {formatRunLabel(slot, run, labelMode)}
             </span>
           )

@@ -16,6 +16,12 @@ const SupportedFixtureFormat = "blockchain_test_engine_x"
 // place, and EngineNewPayloads carry the benchmark block.
 const SupportedStatefulFixtureFormat = "blockchain_test_stateful_engine"
 
+// SupportedStatelessFixtureFormat is the classic blockchain-test format, whose
+// blocks carry statelessInputBytes/statelessOutputBytes at stateless-capable
+// forks. These fixtures convert to engine_proveStatelessValidator calls and need
+// no genesis: the stateless input encodes the whole pre-state.
+const SupportedStatelessFixtureFormat = "blockchain_test"
+
 // Fixture represents a single EEST test fixture.
 type Fixture struct {
 	Info               *FixtureInfo        `json:"_info"`
@@ -30,6 +36,23 @@ type Fixture struct {
 	SnapshotBlockHash      string              `json:"snapshotBlockHash"`
 	StartBlockHash         string              `json:"startBlockHash"`
 	LastBlockHash          string              `json:"lastblockhash"`
+
+	// Blockchain-test fields (only set for SupportedStatelessFixtureFormat).
+	Config *FixtureConfig  `json:"config"`
+	Blocks []*FixtureBlock `json:"blocks"`
+}
+
+// FixtureConfig carries the chain configuration of a blockchain-test fixture.
+type FixtureConfig struct {
+	ChainID string `json:"chainid"`
+}
+
+// FixtureBlock is one block of a blockchain-test fixture. Only the fields the
+// stateless conversion reads are modeled.
+type FixtureBlock struct {
+	BlockHeader          *BlockHeader `json:"blockHeader"`
+	StatelessInputBytes  string       `json:"statelessInputBytes"`
+	StatelessOutputBytes string       `json:"statelessOutputBytes"`
 }
 
 // StatefulPreRun is a shared pre_run file referenced by stateful fixtures via
@@ -56,13 +79,17 @@ type FixtureInfo struct {
 	Metadata              *FixtureMetadata `json:"metadata,omitempty"`
 }
 
-// FixtureMetadata is the optional _info.metadata block written by
-// fill-stateful at fill time.
+// FixtureMetadata is the optional _info.metadata block. fill-stateful writes
+// opcode_counts, while a stateless fixture carries opcode_count_per_block.
+// The sibling opcode_count field is deliberately not modeled because it sums
+// every block, while only the benchmark block is proven.
 type FixtureMetadata struct {
 	// OpcodeCounts holds per-opcode execution counts, one entry per
 	// EngineNewPayloads block: OpcodeCounts[i] is the count for
 	// EngineNewPayloads[i], or nil when its trace was unavailable.
-	OpcodeCounts []map[string]int `json:"opcode_counts,omitempty"`
+	OpcodeCounts        []map[string]int `json:"opcode_counts,omitempty"`
+	OpcodeCountPerBlock []map[string]int `json:"opcode_count_per_block,omitempty"`
+	TargetOpcode        string           `json:"target_opcode,omitempty"`
 }
 
 // AggregatedOpcodeCount returns the fixture's per-opcode execution counts as a
@@ -106,13 +133,36 @@ func (f *Fixture) IsSupportedFormat() bool {
 	}
 
 	return f.Info.FixtureFormat == SupportedFixtureFormat ||
-		f.Info.FixtureFormat == SupportedStatefulFixtureFormat
+		f.Info.FixtureFormat == SupportedStatefulFixtureFormat ||
+		f.Info.FixtureFormat == SupportedStatelessFixtureFormat
 }
 
 // IsStateful reports whether the fixture uses the stateful-engine format, which
 // replays against a snapshot datadir and carries no genesis.
 func (f *Fixture) IsStateful() bool {
 	return f.Info != nil && f.Info.FixtureFormat == SupportedStatefulFixtureFormat
+}
+
+// IsStateless reports whether the fixture uses the blockchain-test format
+// whose blocks may carry stateless validation bytes.
+func (f *Fixture) IsStateless() bool {
+	return f.Info != nil && f.Info.FixtureFormat == SupportedStatelessFixtureFormat
+}
+
+// StatelessOpcodeCount returns the benchmark block's opcode counts from
+// _info.metadata, nil when absent or when the per-block list does not line up
+// with the blocks.
+func (f *Fixture) StatelessOpcodeCount() map[string]int {
+	if f.Info == nil || f.Info.Metadata == nil || len(f.Blocks) == 0 {
+		return nil
+	}
+
+	perBlock := f.Info.Metadata.OpcodeCountPerBlock
+	if len(perBlock) != len(f.Blocks) {
+		return nil
+	}
+
+	return perBlock[len(f.Blocks)-1]
 }
 
 // BlockHeader represents an Ethereum block header.

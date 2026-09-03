@@ -37,6 +37,7 @@ import { LiveRunDetailView } from '@/components/run-detail/LiveRunDetailView'
 import { type IndexStepType, ALL_INDEX_STEP_TYPES } from '@/api/types'
 import { ClientRunsStrip } from '@/components/run-detail/ClientRunsStrip'
 import { BlockLogsDashboard } from '@/components/run-detail/block-logs-dashboard'
+import { isProvingRun } from '@/utils/blockLogs'
 import { useBlockLogs } from '@/api/hooks/useBlockLogs'
 import { Flame, Download, SquareStack, GitCompareArrows, Trash2 } from 'lucide-react'
 import { MAX_COMPARE_RUNS, MIN_COMPARE_RUNS } from '@/components/compare/constants'
@@ -896,7 +897,7 @@ export function RunDetailPage() {
           )}
 
           {blockLogs && Object.keys(blockLogs).length > 0 && (
-            <BlockLogsDashboard blockLogs={blockLogs} runId={runId} suiteTests={suite?.tests} onTestClick={handleTestModalChange} searchQuery={q} fullscreen={blFs} onFullscreenChange={handleBlockLogsFullscreenChange} />
+            <BlockLogsDashboard blockLogs={blockLogs} runId={runId} isProving={isProvingRun(config)} suiteTests={suite?.tests} onTestClick={handleTestModalChange} searchQuery={q} fullscreen={blFs} onFullscreenChange={handleBlockLogsFullscreenChange} />
           )}
 
           <ResourceUsageCharts

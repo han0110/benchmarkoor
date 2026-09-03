@@ -30,9 +30,9 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
   if (cachedConfig) return cachedConfig
 
   try {
-    const response = await fetch('/config.json')
+    const response = await fetch(`${import.meta.env.BASE_URL}config.json`)
     if (!response.ok) {
-      return { dataSource: '/results' }
+      return { dataSource: `${import.meta.env.BASE_URL}results` }
     }
     const config: RuntimeConfig = await response.json()
 
@@ -59,7 +59,7 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
     cachedConfig = config
     return cachedConfig
   } catch {
-    return { dataSource: '/results' }
+    return { dataSource: `${import.meta.env.BASE_URL}results` }
   }
 }
 

@@ -4,12 +4,17 @@ import { ChevronUp, ChevronDown } from 'lucide-react'
 import type { ProcessedTestData, DashboardState, SortField, SortOrder } from '../types'
 import { CATEGORY_COLORS } from '../utils/colors'
 import { Pagination } from '@/components/shared/Pagination'
+import { formatBytes } from '@/utils/format'
 
 interface BlockLogsTableProps {
   data: ProcessedTestData[]
   state: DashboardState
   onUpdate: (updates: Partial<DashboardState>) => void
   onTestClick?: (testName: string) => void
+  /** Names the measured time, "Execution" or "Proving". */
+  timeLabel: string
+  /** True when the run's client proves blocks rather than executing them. */
+  isProving: boolean
 }
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
@@ -59,7 +64,7 @@ function SortHeader({ label, field, currentSort, currentOrder, onSort, align = '
   )
 }
 
-export function BlockLogsTable({ data, state, onUpdate, onTestClick }: BlockLogsTableProps) {
+export function BlockLogsTable({ data, state, onUpdate, onTestClick, timeLabel, isProving }: BlockLogsTableProps) {
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
 
@@ -178,7 +183,7 @@ export function BlockLogsTable({ data, state, onUpdate, onTestClick }: BlockLogs
               </th>
               <th scope="col" className="px-3 py-3 text-right text-xs">
                 <SortHeader
-                  label="Execution"
+                  label={timeLabel}
                   field="execution"
                   currentSort={state.sortBy}
                   currentOrder={state.sortOrder}
@@ -186,46 +191,76 @@ export function BlockLogsTable({ data, state, onUpdate, onTestClick }: BlockLogs
                   align="right"
                 />
               </th>
-              <th scope="col" className="px-3 py-3 text-right text-xs" title="state_read + state_hash + commit">
-                <SortHeader
-                  label="Overhead"
-                  field="overhead"
-                  currentSort={state.sortBy}
-                  currentOrder={state.sortOrder}
-                  onSort={handleSort}
-                  align="right"
-                />
-              </th>
-              <th scope="col" className="px-3 py-3 text-right text-xs">
-                <SortHeader
-                  label="Acct Cache"
-                  field="accountCache"
-                  currentSort={state.sortBy}
-                  currentOrder={state.sortOrder}
-                  onSort={handleSort}
-                  align="right"
-                />
-              </th>
-              <th scope="col" className="px-3 py-3 text-right text-xs">
-                <SortHeader
-                  label="Storage Cache"
-                  field="storageCache"
-                  currentSort={state.sortBy}
-                  currentOrder={state.sortOrder}
-                  onSort={handleSort}
-                  align="right"
-                />
-              </th>
-              <th scope="col" className="px-3 py-3 text-right text-xs">
-                <SortHeader
-                  label="Code Cache"
-                  field="codeCache"
-                  currentSort={state.sortBy}
-                  currentOrder={state.sortOrder}
-                  onSort={handleSort}
-                  align="right"
-                />
-              </th>
+              {/* Proving clients report proof and input sizes but no state
+                  overhead or caches, so the table swaps one group of columns
+                  for the other rather than carrying a page of blanks. */}
+              {isProving ? (
+                <>
+                  <th scope="col" className="px-3 py-3 text-right text-xs" title="Stateless input proven">
+                    <SortHeader
+                      label="Stateless Input"
+                      field="statelessInput"
+                      currentSort={state.sortBy}
+                      currentOrder={state.sortOrder}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right text-xs" title="Proof size">
+                    <SortHeader
+                      label="Proof"
+                      field="proof"
+                      currentSort={state.sortBy}
+                      currentOrder={state.sortOrder}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                  </th>
+                </>
+              ) : (
+                <>
+                  <th scope="col" className="px-3 py-3 text-right text-xs" title="state_read + state_hash + commit">
+                    <SortHeader
+                      label="Overhead"
+                      field="overhead"
+                      currentSort={state.sortBy}
+                      currentOrder={state.sortOrder}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right text-xs">
+                    <SortHeader
+                      label="Acct Cache"
+                      field="accountCache"
+                      currentSort={state.sortBy}
+                      currentOrder={state.sortOrder}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right text-xs">
+                    <SortHeader
+                      label="Storage Cache"
+                      field="storageCache"
+                      currentSort={state.sortBy}
+                      currentOrder={state.sortOrder}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right text-xs">
+                    <SortHeader
+                      label="Code Cache"
+                      field="codeCache"
+                      currentSort={state.sortBy}
+                      currentOrder={state.sortOrder}
+                      onSort={handleSort}
+                      align="right"
+                    />
+                  </th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -260,36 +295,49 @@ export function BlockLogsTable({ data, state, onUpdate, onTestClick }: BlockLogs
                   <td className="px-3 py-2 text-right font-mono text-sm text-gray-600 dark:text-gray-400">
                     {formatMs(row.executionMs)}
                   </td>
-                  <td className="px-3 py-2 text-right font-mono text-sm text-gray-600 dark:text-gray-400">
-                    {formatMs(row.overheadMs)}
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono text-sm">
-                    <span
-                      className={clsx(
-                        row.accountCacheHitRate >= 80 ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'
-                      )}
-                    >
-                      {formatPercent(row.accountCacheHitRate)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono text-sm">
-                    <span
-                      className={clsx(
-                        row.storageCacheHitRate >= 80 ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'
-                      )}
-                    >
-                      {formatPercent(row.storageCacheHitRate)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono text-sm">
-                    <span
-                      className={clsx(
-                        row.codeCacheHitRate >= 80 ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'
-                      )}
-                    >
-                      {formatPercent(row.codeCacheHitRate)}
-                    </span>
-                  </td>
+                  {isProving ? (
+                    <>
+                      <td className="px-3 py-2 text-right font-mono text-sm text-gray-600 dark:text-gray-400">
+                        {row.statelessInputSize != null ? formatBytes(row.statelessInputSize) : '-'}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-sm text-gray-600 dark:text-gray-400">
+                        {row.proofSize != null ? formatBytes(row.proofSize) : '-'}
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-3 py-2 text-right font-mono text-sm text-gray-600 dark:text-gray-400">
+                        {formatMs(row.overheadMs)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-sm">
+                        <span
+                          className={clsx(
+                            row.accountCacheHitRate >= 80 ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'
+                          )}
+                        >
+                          {formatPercent(row.accountCacheHitRate)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-sm">
+                        <span
+                          className={clsx(
+                            row.storageCacheHitRate >= 80 ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'
+                          )}
+                        >
+                          {formatPercent(row.storageCacheHitRate)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-sm">
+                        <span
+                          className={clsx(
+                            row.codeCacheHitRate >= 80 ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'
+                          )}
+                        >
+                          {formatPercent(row.codeCacheHitRate)}
+                        </span>
+                      </td>
+                    </>
+                  )}
                 </tr>
             ))}
           </tbody>

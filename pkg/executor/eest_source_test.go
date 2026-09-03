@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -235,4 +236,89 @@ func TestPreRunBundleDir(t *testing.T) {
 	// The locator is what lets a caller outside this package find the bundle
 	// without re-deriving it from config.
 	var _ PreRunBundleLocator = (*EESTSource)(nil)
+}
+
+// discoverStatelessFixture runs discovery over the multi-block fixture the eest
+// package vendors, reused so both packages assert against one copy of the real
+// data.
+func discoverStatelessFixture(t *testing.T) *PreparedSource {
+	t.Helper()
+
+	fixture, err := os.ReadFile(filepath.Join("..", "eest", "testdata", "parallel_execution_serial_chain.json"))
+	require.NoError(t, err)
+
+	const subdir = "fixtures/blockchain_tests"
+
+	fixturesDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(fixturesDir, subdir), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(fixturesDir, subdir, "serial_chain.json"), fixture, 0644))
+
+	filter, err := CompileFilter("")
+	require.NoError(t, err)
+
+	log := logrus.New()
+	log.SetOutput(os.Stderr)
+	log.SetLevel(logrus.ErrorLevel)
+
+	source := NewEESTSource(log, &config.EESTFixturesSource{FixturesSubdir: subdir}, t.TempDir(), filter, "")
+	source.fixturesDir = fixturesDir
+
+	prepared, err := source.discoverTests()
+	require.NoError(t, err)
+	require.Len(t, prepared.Tests, 1)
+
+	return prepared
+}
+
+// TestDiscoverStatelessOpcodeCount pins the suite-facing shape of a stateless
+// fixture's opcode data. Counts reach the same field external opcode sources
+// use, and the embedded _info keeps neither the derived map nor the per-block
+// list it came from, so the output matches what other fixture formats produce.
+func TestDiscoverStatelessOpcodeCount(t *testing.T) {
+	discovered := discoverStatelessFixture(t).Tests[0]
+
+	// The benchmark block's own counts, matching pkg/eest's assertions.
+	require.NotNil(t, discovered.OpcodeCount)
+	assert.Equal(t, 38924, discovered.OpcodeCount["PUSH1"])
+	assert.NotContains(t, discovered.OpcodeCount, "CODECOPY")
+
+	require.NotNil(t, discovered.EESTInfo)
+	assert.Nil(t, discovered.EESTInfo.OpcodeCount)
+	require.NotNil(t, discovered.EESTInfo.Metadata)
+	assert.Nil(t, discovered.EESTInfo.Metadata.OpcodeCountPerBlock)
+}
+
+// TestSuiteSummaryStatelessOpcodeShape asserts the raw summary.json keys rather
+// than the decoded structs, because the frontend reads the document as written.
+// A stateless test keeps opcode_count where every consumer looks for it and
+// carries no second copy inside eest.info.
+func TestSuiteSummaryStatelessOpcodeShape(t *testing.T) {
+	prepared := discoverStatelessFixture(t)
+
+	resultsDir := t.TempDir()
+	log := logrus.New()
+	log.SetOutput(os.Stderr)
+	log.SetLevel(logrus.ErrorLevel)
+
+	require.NoError(t, CreateSuiteOutput(log, resultsDir, "statel3ss", &SuiteInfo{Hash: "statel3ss"}, prepared, nil, 0))
+
+	data, err := os.ReadFile(filepath.Join(resultsDir, "suites", "statel3ss", "summary.json"))
+	require.NoError(t, err)
+
+	var summary struct {
+		Tests []map[string]any `json:"tests"`
+	}
+	require.NoError(t, json.Unmarshal(data, &summary))
+	require.Len(t, summary.Tests, 1)
+
+	test := summary.Tests[0]
+
+	counts, ok := test["opcode_count"].(map[string]any)
+	require.True(t, ok, "summary.json must keep test.opcode_count")
+	assert.EqualValues(t, 38924, counts["PUSH1"])
+
+	info, ok := test["eest"].(map[string]any)["info"].(map[string]any)
+	require.True(t, ok)
+	assert.NotContains(t, info, "opcode_count")
+	assert.NotContains(t, info["metadata"], "opcode_count_per_block")
 }

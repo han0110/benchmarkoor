@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { Flame } from 'lucide-react'
-import type { RunResult, SuiteTest, AggregatedStats } from '@/api/types'
+import type { SuiteTest, AggregatedStats } from '@/api/types'
 import { type StepTypeOption, getAggregatedStats } from '@/pages/RunDetailPage'
 import { type ChartType, type CompareRun, type LabelMode, RUN_SLOTS, formatRunLabel } from './constants'
 import { useChartAreaClick } from './useChartAreaClick'
 import { formatTestNameLong } from '@/utils/eestName'
 import { useNameDisplayMode } from '@/hooks/useNameDisplayMode'
+import { getClientLogoUrl } from '@/utils/client-colors'
 
 export interface ZoomRange {
   start: number
@@ -48,32 +49,44 @@ interface MGasDataPoint {
   testIndex: number
   testOrder: number
   testName: string
-  mgas: number
+  mgas: number | null
 }
 
+/** Map every run onto one test list, so a test missing from one run leaves a gap rather than shifting its remaining points. */
 function buildMGasData(
-  result: RunResult,
+  runs: CompareRun[],
   suiteTests: SuiteTest[] | undefined,
   stepFilter: StepTypeOption[],
   nameFilter?: (name: string) => boolean,
-): MGasDataPoint[] {
+): MGasDataPoint[][] {
   const suiteOrder = new Map<string, number>()
   if (suiteTests) {
     suiteTests.forEach((t, i) => suiteOrder.set(t.name, i + 1))
   }
 
-  const entries: { name: string; order: number; mgas: number }[] = []
-  for (const [name, entry] of Object.entries(result.tests)) {
-    if (nameFilter && !nameFilter(name)) continue
-    const stats = getAggregatedStats(entry, stepFilter)
-    const mgas = calculateMGasPerSec(stats)
-    if (mgas === undefined) continue
-    const order = suiteOrder.get(name) ?? (parseInt(entry.dir, 10) || 0)
-    entries.push({ name, order, mgas })
-  }
+  const orderByName = new Map<string, number>()
+  const mgasPerRun = runs.map((run) => {
+    const mgasByName = new Map<string, number>()
+    for (const [name, entry] of Object.entries(run.result?.tests ?? {})) {
+      if (nameFilter && !nameFilter(name)) continue
+      const stats = getAggregatedStats(entry, stepFilter)
+      const mgas = calculateMGasPerSec(stats)
+      if (mgas === undefined) continue
+      mgasByName.set(name, mgas)
+      if (!orderByName.has(name)) orderByName.set(name, suiteOrder.get(name) ?? (parseInt(entry.dir, 10) || 0))
+    }
+    return mgasByName
+  })
 
-  entries.sort((a, b) => a.order - b.order)
-  return entries.map((e, i) => ({ testIndex: i + 1, testOrder: e.order, testName: e.name, mgas: e.mgas }))
+  const unifiedTests = [...orderByName].sort((a, b) => a[1] - b[1])
+  return mgasPerRun.map((mgasByName) =>
+    unifiedTests.map(([name, order], i) => ({
+      testIndex: i + 1,
+      testOrder: order,
+      testName: name,
+      mgas: mgasByName.get(name) ?? null,
+    })),
+  )
 }
 
 export function MGasComparisonChart({ runs, suiteTests, stepFilter, labelMode, testNameFilter, zoomRange: externalZoom, onZoomChange, chartType = 'line', onTestClick }: MGasComparisonChartProps) {
@@ -104,7 +117,7 @@ export function MGasComparisonChart({ runs, suiteTests, stepFilter, labelMode, t
   const onEvents = useMemo(() => ({ datazoom: handleZoom }), [handleZoom])
 
   const pointsPerRun = useMemo(
-    () => runs.map((r) => r.result ? buildMGasData(r.result, suiteTests, stepFilter, testNameFilter) : []),
+    () => buildMGasData(runs, suiteTests, stepFilter, testNameFilter),
     [runs, suiteTests, stepFilter, testNameFilter],
   )
 
@@ -143,19 +156,20 @@ export function MGasComparisonChart({ runs, suiteTests, stepFilter, labelMode, t
         textStyle: { color: textColor },
         extraCssText: 'max-width: 300px; white-space: normal;',
         formatter: (
-          params: Array<{ seriesName: string; color: string; value: [number, number, string, number] }>,
+          params: Array<{ seriesName: string; color: string; value: [number, number | null, string, number] }>,
         ) => {
-          if (!params.length) return ''
-          const testOrder = params[0].value[3]
-          const testName = params[0].value[2]
+          const visible = params.filter((p) => p.value[1] != null)
+          if (!visible.length) return ''
+          const testOrder = visible[0].value[3]
+          const testName = visible[0].value[2]
           highlightedTestRef.current = testName
           let content = `<strong>Test #${testOrder}</strong>`
           if (testName) content += `<br/><span style="font-size: 10px; color: ${isDark ? '#9ca3af' : '#6b7280'};">${formatTestNameLong(testName, nameMode)}</span>`
           content += '<br/>'
-          params.forEach((p) => {
-            const value = p.value[1]
+          visible.forEach((p) => {
+            const value = p.value[1] as number
             const client = clientBySeriesName.get(p.seriesName)
-            const clientImg = client ? `<img src="/img/clients/${client}.jpg" style="display:inline-block;width:14px;height:14px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;" />` : ''
+            const clientImg = client ? `<img src="${getClientLogoUrl(client)}" style="display:inline-block;width:14px;height:14px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;" />` : ''
             content += `${clientImg}<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background-color:${p.color};margin-right:6px;vertical-align:middle;"></span>${p.seriesName}: ${value.toFixed(2)} MGas/s<br/>`
           })
           return content
@@ -237,6 +251,7 @@ export function MGasComparisonChart({ runs, suiteTests, stepFilter, labelMode, t
         return {
           ...base,
           type: 'line' as const,
+          connectNulls: false,
           smooth: maxLen <= 100,
           showSymbol: maxLen <= 100,
           symbolSize: 4,
@@ -261,7 +276,7 @@ export function MGasComparisonChart({ runs, suiteTests, stepFilter, labelMode, t
             const slot = RUN_SLOTS[run.index]
             return (
               <span key={slot.label} className={`inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 font-medium ${slot.badgeBgClass} ${slot.badgeTextClass}`}>
-                <img src={`/img/clients/${run.config.instance.client}.jpg`} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
+                <img src={getClientLogoUrl(run.config.instance.client)} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
                 {formatRunLabel(slot, run, labelMode)}
               </span>
             )

@@ -1,8 +1,9 @@
 import clsx from 'clsx'
-import { getBaseClient, getClientColors } from '@/utils/client-colors'
+import { getBaseClient, getClientColors, getClientDisplayName, getClientLogoUrl } from '@/utils/client-colors'
 
 interface ClientBadgeProps {
   client: string
+  metadata?: Record<string, string>
   className?: string
   hideLabel?: boolean
 }
@@ -12,10 +13,14 @@ function capitalizeFirst(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
-export function ClientBadge({ client, className, hideLabel = false }: ClientBadgeProps) {
+export function ClientBadge({ client, metadata, className, hideLabel = false }: ClientBadgeProps) {
   const base = getBaseClient(client)
   const colors = getClientColors(client)
-  const logoPath = `/img/clients/${base}.jpg`
+  const logoPath = getClientLogoUrl(base)
+  const displayName = getClientDisplayName(client, metadata)
+  // Names derived from labels keep their casing, so ethrex-zisk does not
+  // render as Ethrex-zisk.
+  const label = displayName === client ? capitalizeFirst(client) : displayName
 
   return (
     <span
@@ -30,7 +35,11 @@ export function ClientBadge({ client, className, hideLabel = false }: ClientBadg
       )}
     >
       <img src={logoPath} alt={`${client} logo`} className="size-4 rounded-full object-cover" />
-      {!hideLabel && capitalizeFirst(client)}
+      {!hideLabel && (
+        <span className="truncate" title={label}>
+          {label}
+        </span>
+      )}
     </span>
   )
 }

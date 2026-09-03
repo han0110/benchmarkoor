@@ -2,6 +2,8 @@ package eest
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -614,4 +616,187 @@ func TestEngineNewPayload_UnmarshalJSON(t *testing.T) {
 	assert.Equal(t, "0xbeacon", payload.ParentBeaconBlockRoot)
 	assert.Empty(t, payload.BlobVersionedHashes)
 	assert.Empty(t, payload.ExecutionRequests)
+}
+
+// Fixtures taken from the tests-zkevm-benchmark v0.6.2 release under
+// blockchain_tests/for_amsterdam_at_0001M/compute, reduced to the keys the
+// fixture structs declare. Dropping the pre state, RLP and witnesses leaves
+// every value unmodified, so these parse to the same Fixture the upstream
+// files do. empty_block.json is the smallest fixture in the corpus and covers
+// the single-block case, while parallel_execution_serial_chain.json is the
+// smallest multi-block one and covers benchmark-block selection.
+const (
+	emptyBlockFixtureFile = "empty_block.json"
+	emptyBlockFixtureName = "tests/benchmark/compute/scenario/test_transaction_types.py::" +
+		"test_empty_block[fork_Amsterdam-blockchain_test-benchmark-gas-value_1M]"
+	emptyBlockHash = "0xf590aba02ef7869920ea4fde6f77ddb4fc10943573564482cbf483ffd4bcfa9e"
+
+	serialChainFixtureFile = "parallel_execution_serial_chain.json"
+	serialChainFixtureName = "tests/benchmark/compute/eip7928_block_level_access_lists/test_block_access_list.py::" +
+		"test_parallel_execution_serial_chain[fork_Amsterdam-blockchain_test-benchmark-gas-value_1M]"
+	serialChainSetupBlockHash     = "0x5decc4bfc0ec143855b3713965a68271cc7369eb6438838933648693911e08b7"
+	serialChainBenchmarkBlockHash = "0xc741905560dce0e9b885f372d6113370260f0339ab84f529c1c6950de6bad0b3"
+)
+
+// loadTestdataFixture parses a vendored fixture file and returns its single
+// test entry, asserting the expected pytest node ID is the one present.
+func loadTestdataFixture(t *testing.T, file, name string) *Fixture {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join("testdata", file))
+	require.NoError(t, err)
+
+	fixtures, err := ParseFixtureFile(data)
+	require.NoError(t, err)
+	require.Len(t, fixtures, 1)
+
+	fixture := fixtures[name]
+	require.NotNil(t, fixture, "fixture %q missing from %s", name, file)
+
+	return fixture
+}
+
+// statelessCall is the decoded shape of an engine_proveStatelessValidator
+// line, whose single param is the block payload.
+type statelessCall struct {
+	JSONRPC string              `json:"jsonrpc"`
+	Method  string              `json:"method"`
+	Params  []map[string]string `json:"params"`
+}
+
+func decodeStatelessCall(t *testing.T, line string) statelessCall {
+	t.Helper()
+
+	var call statelessCall
+	require.NoError(t, json.Unmarshal([]byte(line), &call))
+	require.Len(t, call.Params, 1)
+
+	return call
+}
+
+// assertHexEqual compares the kilobyte-scale hex fields of a real fixture,
+// reporting length and prefix instead of dumping both operands on failure.
+func assertHexEqual(t *testing.T, expected, actual, field string) {
+	t.Helper()
+
+	assert.True(t, expected == actual,
+		"%s mismatch, want %d chars from %.18s, got %d chars from %.18s",
+		field, len(expected), expected, len(actual), actual)
+}
+
+func TestConvertStatelessFixture_SingleBlock(t *testing.T) {
+	fixture := loadTestdataFixture(t, emptyBlockFixtureFile, emptyBlockFixtureName)
+
+	require.True(t, fixture.IsStateless())
+	require.True(t, fixture.IsSupportedFormat())
+	require.Len(t, fixture.Blocks, 1)
+
+	converted, err := ConvertStatelessFixture(emptyBlockFixtureName, fixture)
+	require.NoError(t, err)
+
+	assert.Equal(t, emptyBlockFixtureName, converted.Name)
+	assert.Empty(t, converted.SetupLines)
+	assert.Equal(t, 1, converted.PayloadCount)
+	assert.Equal(t, emptyBlockHash, converted.FinalHash)
+	require.Len(t, converted.TestLines, 1)
+
+	call := decodeStatelessCall(t, converted.TestLines[0])
+	assert.Equal(t, "2.0", call.JSONRPC)
+	assert.Equal(t, "engine_proveStatelessValidator", call.Method)
+
+	// blockHash and gasUsed sit where the executor's block payload extractors
+	// read them, and the stateless bytes pass through unchanged.
+	block := fixture.Blocks[0]
+	assert.Equal(t, emptyBlockHash, call.Params[0]["blockHash"])
+	assert.Equal(t, "0x01", call.Params[0]["blockNumber"])
+	assert.Equal(t, "0x00", call.Params[0]["gasUsed"])
+	assertHexEqual(t, block.StatelessInputBytes, call.Params[0]["statelessInput"], "statelessInput")
+	assertHexEqual(t, block.StatelessOutputBytes, call.Params[0]["expectedStatelessOutput"], "expectedStatelessOutput")
+
+	// The lone per-block entry is the benchmark block's.
+	counts := fixture.StatelessOpcodeCount()
+	assert.Equal(t, 1, counts["NUMBER"])
+	assert.Equal(t, 19, counts["SSTORE"])
+}
+
+// TestConvertStatelessFixture_MultiBlock pins the benchmark-block selection a
+// multi-block fixture depends on, covering both the proven payload and the
+// opcode counts reported alongside it.
+func TestConvertStatelessFixture_MultiBlock(t *testing.T) {
+	fixture := loadTestdataFixture(t, serialChainFixtureFile, serialChainFixtureName)
+
+	require.True(t, fixture.IsStateless())
+	require.Len(t, fixture.Blocks, 2)
+	assert.Equal(t, serialChainSetupBlockHash, fixture.Blocks[0].BlockHeader.Hash)
+
+	converted, err := ConvertStatelessFixture(serialChainFixtureName, fixture)
+	require.NoError(t, err)
+
+	// Only the last block is proven, so the setup block contributes no line.
+	assert.Empty(t, converted.SetupLines)
+	assert.Equal(t, 1, converted.PayloadCount)
+	assert.Equal(t, serialChainBenchmarkBlockHash, converted.FinalHash)
+	require.Len(t, converted.TestLines, 1)
+
+	benchmark := fixture.Blocks[1]
+
+	call := decodeStatelessCall(t, converted.TestLines[0])
+	assert.Equal(t, serialChainBenchmarkBlockHash, call.Params[0]["blockHash"])
+	assert.Equal(t, "0x02", call.Params[0]["blockNumber"])
+	assert.Equal(t, "0x0f4229", call.Params[0]["gasUsed"])
+	assertHexEqual(t, benchmark.StatelessInputBytes, call.Params[0]["statelessInput"], "statelessInput")
+
+	// EEST ships no top-level _info.opcode_count, and the metadata sibling
+	// summing every block is deliberately not parsed, so counts come from the
+	// benchmark block's own per-block entry. That entry omits the CODECOPY and
+	// the 49 PUSH1s only the setup block executes.
+	assert.Nil(t, fixture.Info.OpcodeCount)
+
+	counts := fixture.StatelessOpcodeCount()
+	assert.Equal(t, 38924, counts["PUSH1"])
+	assert.NotContains(t, counts, "CODECOPY")
+
+	setupCounts := fixture.Info.Metadata.OpcodeCountPerBlock[0]
+	assert.Equal(t, 49, setupCounts["PUSH1"])
+	assert.Equal(t, 1, setupCounts["CODECOPY"])
+}
+
+func TestConvertStatelessFixture_NoStatelessInput(t *testing.T) {
+	fixture := &Fixture{
+		Info:   &FixtureInfo{FixtureFormat: SupportedStatelessFixtureFormat},
+		Blocks: []*FixtureBlock{{BlockHeader: &BlockHeader{Hash: "0x1"}}},
+	}
+
+	_, err := ConvertStatelessFixture("test", fixture)
+	require.ErrorIs(t, err, ErrNoStatelessInput)
+
+	fixture.Blocks[0].StatelessInputBytes = "0x"
+	_, err = ConvertStatelessFixture("test", fixture)
+	require.ErrorIs(t, err, ErrNoStatelessInput)
+}
+
+func TestConvertStatelessFixture_InputWithoutOutput(t *testing.T) {
+	fixture := &Fixture{
+		Info: &FixtureInfo{FixtureFormat: SupportedStatelessFixtureFormat},
+		Blocks: []*FixtureBlock{{
+			BlockHeader:         &BlockHeader{Hash: "0x1"},
+			StatelessInputBytes: "0x1501aa",
+		}},
+	}
+
+	_, err := ConvertStatelessFixture("test", fixture)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrNoStatelessInput)
+}
+
+func TestStatelessOpcodeCount_LengthMismatch(t *testing.T) {
+	fixture := &Fixture{
+		Info: &FixtureInfo{
+			FixtureFormat: SupportedStatelessFixtureFormat,
+			Metadata:      &FixtureMetadata{OpcodeCountPerBlock: []map[string]int{{"ADD": 1}}},
+		},
+		Blocks: []*FixtureBlock{{}, {}},
+	}
+
+	assert.Nil(t, fixture.StatelessOpcodeCount())
 }

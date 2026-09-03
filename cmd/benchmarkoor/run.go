@@ -325,6 +325,7 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 			DataDirs:           cfg.Runner.Client.DataDirs,
 			TmpDataDir:         cfg.Runner.Directories.TmpDataDir,
 			CacheDir:           cacheDir,
+			ReadyTimeout:       cfg.GetReadyTimeout(),
 			TestFilter:         cfg.Runner.Benchmark.Tests.Filter,
 			FullConfig:         cfg,
 			StopAfterPrerun:    stopAfterPrerun,

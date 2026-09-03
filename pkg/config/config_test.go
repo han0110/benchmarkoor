@@ -3207,6 +3207,7 @@ func TestValidateRunTimeout(t *testing.T) {
 	tests := []struct {
 		name        string
 		runnerLevel string
+		readyLevel  string
 		global      string
 		instance    string
 		wantErr     bool
@@ -3247,13 +3248,24 @@ func TestValidateRunTimeout(t *testing.T) {
 			wantErr:     true,
 			errSubstr:   "invalid runner.run_timeout",
 		},
+		{
+			name:       "valid ready timeout",
+			readyLevel: "15m",
+		},
+		{
+			name:       "invalid ready timeout",
+			readyLevel: "bad",
+			wantErr:    true,
+			errSubstr:  "invalid runner.ready_timeout",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
 				Runner: RunnerConfig{
-					RunTimeout: tt.runnerLevel,
+					RunTimeout:   tt.runnerLevel,
+					ReadyTimeout: tt.readyLevel,
 					Client: ClientConfig{
 						Config: ClientDefaults{
 							RunTimeout: tt.global,

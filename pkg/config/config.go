@@ -627,6 +627,7 @@ type RunnerConfig struct {
 	ContainerNetwork   string               `yaml:"container_network" mapstructure:"container_network"`
 	CleanupOnStart     bool                 `yaml:"cleanup_on_start" mapstructure:"cleanup_on_start"`
 	RunTimeout         string               `yaml:"run_timeout,omitempty" mapstructure:"run_timeout"`
+	ReadyTimeout       string               `yaml:"ready_timeout,omitempty" mapstructure:"ready_timeout"`
 	Directories        DirectoriesConfig    `yaml:"directories,omitempty" mapstructure:"directories"`
 	DropCachesPath     string               `yaml:"drop_caches_path,omitempty" mapstructure:"drop_caches_path"`
 	CPUSysfsPath       string               `yaml:"cpu_sysfs_path,omitempty" mapstructure:"cpu_sysfs_path"`
@@ -2051,6 +2052,7 @@ func bindEnvKeys(v *viper.Viper) {
 		"runner.container_network",
 		"runner.cleanup_on_start",
 		"runner.run_timeout",
+		"runner.ready_timeout",
 		"runner.directories.tmp_datadir",
 		"runner.directories.tmp_cachedir",
 		"runner.github_token",
@@ -3108,6 +3110,7 @@ var validClients = map[string]struct{}{
 	"nimbus":     {},
 	"reth":       {},
 	"ethrex":     {},
+	"provoor":    {},
 }
 
 // validDropMemoryCachesValues contains valid values for drop_memory_caches.
@@ -3309,6 +3312,23 @@ func (c *Config) GetRunnerRunTimeout() time.Duration {
 	}
 
 	d, err := time.ParseDuration(c.Runner.RunTimeout)
+	if err != nil {
+		return 0
+	}
+
+	return d
+}
+
+// GetReadyTimeout returns the timeout for waiting for a client's RPC to
+// become ready after container start. Returns 0 if not set, in which case
+// the runner falls back to its default. Clients that defer opening their
+// RPC port until slow internal setup completes need a larger value.
+func (c *Config) GetReadyTimeout() time.Duration {
+	if c.Runner.ReadyTimeout == "" {
+		return 0
+	}
+
+	d, err := time.ParseDuration(c.Runner.ReadyTimeout)
 	if err != nil {
 		return 0
 	}
@@ -3926,6 +3946,13 @@ func (c *Config) validateRunTimeout() error {
 		if _, err := time.ParseDuration(c.Runner.RunTimeout); err != nil {
 			return fmt.Errorf("invalid runner.run_timeout %q: %w",
 				c.Runner.RunTimeout, err)
+		}
+	}
+
+	if c.Runner.ReadyTimeout != "" {
+		if _, err := time.ParseDuration(c.Runner.ReadyTimeout); err != nil {
+			return fmt.Errorf("invalid runner.ready_timeout %q: %w",
+				c.Runner.ReadyTimeout, err)
 		}
 	}
 

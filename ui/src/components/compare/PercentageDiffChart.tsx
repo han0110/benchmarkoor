@@ -8,6 +8,7 @@ import type { ZoomRange } from './MGasComparisonChart'
 import { useChartAreaClick } from './useChartAreaClick'
 import { formatTestNameLong } from '@/utils/eestName'
 import { useNameDisplayMode } from '@/hooks/useNameDisplayMode'
+import { getClientLogoUrl } from '@/utils/client-colors'
 
 interface PercentageDiffChartProps {
   runs: CompareRun[]
@@ -193,7 +194,7 @@ export function PercentageDiffChart({ runs, suiteTests, stepFilter, baselineIdx,
           highlightedTestRef.current = testName
           const baseSlot = RUN_SLOTS[baselineIdx]
           const baseClient = runs[baselineIdx].config.instance.client
-          const baseImg = `<img src="/img/clients/${baseClient}.jpg" style="display:inline-block;width:14px;height:14px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;" />`
+          const baseImg = `<img src="${getClientLogoUrl(baseClient)}" style="display:inline-block;width:14px;height:14px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;" />`
 
           let content = `<strong>Test #${testOrder}</strong>`
           if (testName) content += `<br/><span style="font-size: 10px; color: ${isDark ? '#9ca3af' : '#6b7280'};">${formatTestNameLong(testName, nameMode)}</span>`
@@ -207,7 +208,7 @@ export function PercentageDiffChart({ runs, suiteTests, stepFilter, baselineIdx,
             const label = diff >= 0 ? 'faster' : 'slower'
             const seriesRunIdx = otherRunIndices.find((ri) => `vs ${formatRunLabel(RUN_SLOTS[ri], runs[ri], labelMode)}` === p.seriesName)
             const client = seriesRunIdx !== undefined ? runs[seriesRunIdx].config.instance.client : undefined
-            const clientImg = client ? `<img src="/img/clients/${client}.jpg" style="display:inline-block;width:14px;height:14px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;" />` : ''
+            const clientImg = client ? `<img src="${getClientLogoUrl(client)}" style="display:inline-block;width:14px;height:14px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;" />` : ''
             content += `${clientImg}<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background-color:${p.color};margin-right:6px;vertical-align:middle;"></span>${p.seriesName}: ${absMGas.toFixed(2)} MGas/s <span style="color:${color};font-weight:600;">(${sign}${diff.toFixed(1)}% ${label})</span><br/>`
           })
           return content
@@ -354,7 +355,7 @@ export function PercentageDiffChart({ runs, suiteTests, stepFilter, baselineIdx,
                     }`}
                   >
                     <img
-                      src={`/img/clients/${run.config.instance.client}.jpg`}
+                      src={getClientLogoUrl(run.config.instance.client)}
                       alt={run.config.instance.client}
                       className="size-3.5 rounded-full object-cover"
                     />
@@ -374,7 +375,7 @@ export function PercentageDiffChart({ runs, suiteTests, stepFilter, baselineIdx,
                   className={`inline-flex items-center gap-1.5 rounded-xs px-2 py-0.5 font-medium ${slot.badgeBgClass} ${slot.badgeTextClass}`}
                 >
                   <img
-                    src={`/img/clients/${run.config.instance.client}.jpg`}
+                    src={getClientLogoUrl(run.config.instance.client)}
                     alt={run.config.instance.client}
                     className="size-3.5 rounded-full object-cover"
                   />
@@ -457,7 +458,7 @@ export function PercentageDiffChart({ runs, suiteTests, stepFilter, baselineIdx,
                 <tr key={slot.label}>
                   <td className="py-1">
                     <span className="inline-flex items-center gap-1.5 font-medium" style={{ color: slot.color }}>
-                      <img src={`/img/clients/${run.config.instance.client}.jpg`} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
+                      <img src={getClientLogoUrl(run.config.instance.client)} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
                       {formatRunLabel(slot, run, labelMode)}
                     </span>
                   </td>

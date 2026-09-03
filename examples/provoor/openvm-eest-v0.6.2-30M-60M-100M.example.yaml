@@ -1,0 +1,66 @@
+# EEST v0.6.2 30M/60M/100M suite
+global:
+  log_level: info
+
+runner:
+  client_logs_to_stdout: true
+  container_network: benchmarkoor
+  cleanup_on_start: false
+  # The forwarder listens only after worker readiness and a warmup proof.
+  ready_timeout: 15m
+
+  benchmark:
+    results_dir: ./results
+    system_resource_collection_enabled: false
+    tests:
+      filter: 'regex:gas-value_(30|60|100)M\]'
+      metadata:
+        labels:
+          name: "zkVM stateless validation, eest v0.6.2, 30M/60M/100M gas"
+      source:
+        eest_fixtures:
+          github_repo: han0110/execution-specs
+          github_release: tests-zkevm-benchmark@v0.6.2
+          fixtures_subdir: fixtures/blockchain_tests
+
+  instances:
+    - id: reth-openvm
+      client: provoor
+      image: ghcr.io/han0110/provoor/provoor:latest
+      metadata:
+        labels:
+          zkvm: openvm
+          stateless_validator: reth
+      extra_args:
+        - --zkvm=openvm
+        - --stateless-validator=reth
+        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-reth-openvm-v2.1.0-preview.elf
+        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-reth-openvm-v2.1.0-preview.vk
+        - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
+    - id: ethrex-openvm
+      client: provoor
+      image: ghcr.io/han0110/provoor/provoor:latest
+      metadata:
+        labels:
+          zkvm: openvm
+          stateless_validator: ethrex
+      extra_args:
+        - --zkvm=openvm
+        - --stateless-validator=ethrex
+        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-ethrex-openvm-v2.1.0-preview.elf
+        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-ethrex-openvm-v2.1.0-preview.vk
+        - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
+    - id: zesu-openvm
+      client: provoor
+      image: ghcr.io/han0110/provoor/provoor:latest
+      metadata:
+        labels:
+          zkvm: openvm
+          stateless_validator: zesu
+      extra_args:
+        - --zkvm=openvm
+        - --stateless-validator=zesu
+        - --elf=https://github.com/han0110/zesu-zkvm/releases/download/glamsterdam-devnet-7/stateless-validator-zesu-openvm-v2.1.0-preview.elf
+        - --vk=https://github.com/han0110/zesu-zkvm/releases/download/glamsterdam-devnet-7/stateless-validator-zesu-openvm-v2.1.0-preview.vk
+        - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
+

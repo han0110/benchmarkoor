@@ -7,6 +7,8 @@ import { type StepTypeOption, getAggregatedStats } from '@/pages/RunDetailPage'
 import { Pagination } from '@/components/shared/Pagination'
 import { TestName } from '@/components/shared/TestName'
 import { type CompareRun, type LabelMode, RUN_SLOTS, formatRunLabel } from './constants'
+import { getClientLogoUrl } from '@/utils/client-colors'
+import { isProvingRun, measuredTimeLabel, measuredTimeMs } from '@/utils/blockLogs'
 
 interface TestComparisonTableProps {
   runs: CompareRun[]
@@ -57,10 +59,10 @@ const BLOCK_LOG_METRICS: MetricTab[] = [
   { id: 'bl-code-cache', label: 'Code Cache HR', unit: '%', higherIsBetter: true, format: (v) => v.toFixed(1) },
 ]
 
-function extractBlockLogMetric(entry: BlockLogEntry, metricId: string): number {
+function extractBlockLogMetric(entry: BlockLogEntry, metricId: string, isProving: boolean): number {
   switch (metricId) {
     case 'bl-throughput': return entry.throughput?.mgas_per_sec ?? 0
-    case 'bl-execution': return entry.timing?.execution_ms ?? 0
+    case 'bl-execution': return measuredTimeMs(entry, isProving)
     case 'bl-overhead': return (entry.timing?.state_read_ms ?? 0) + (entry.timing?.state_hash_ms ?? 0) + (entry.timing?.commit_ms ?? 0)
     case 'bl-account-cache': return entry.cache?.account?.hit_rate ?? 0
     case 'bl-storage-cache': return entry.cache?.storage?.hit_rate ?? 0
@@ -144,15 +146,22 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
 
   const hasBlockLogs = blockLogsPerRun?.some((bl) => bl !== null) ?? false
 
+  // The compare page rejects a set mixing proving and executing runs, so one
+  // flag describes every run reaching this table.
+  const isProving = useMemo(() => runs.some((run) => isProvingRun(run.config)), [runs])
+  const timeLabel = measuredTimeLabel(isProving)
+
   const tabs: MetricTab[] = useMemo(() => {
     const base: MetricTab[] = [
       { id: 'mgas', label: 'MGas/s', unit: 'MGas/s', higherIsBetter: true, format: (v) => v >= 100 ? v.toFixed(0) : v.toFixed(2) },
     ]
     if (hasBlockLogs) {
-      return [...base, ...BLOCK_LOG_METRICS]
+      return [...base, ...BLOCK_LOG_METRICS.map((metric) =>
+        metric.id === 'bl-execution' ? { ...metric, label: `${timeLabel} Time` } : metric
+      )]
     }
     return base
-  }, [hasBlockLogs])
+  }, [hasBlockLogs, timeLabel])
 
   const activeMetric = tabs.find((t) => t.id === activeTab) ?? tabs[0]
 
@@ -199,7 +208,7 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
         for (let i = 0; i < runs.length; i++) {
           const bl = blockLogsPerRun?.[i]
           const entry = bl?.[name]
-          values.push(entry ? extractBlockLogMetric(entry, activeTab) : undefined)
+          values.push(entry ? extractBlockLogMetric(entry, activeTab, isProving) : undefined)
         }
       }
 
@@ -224,7 +233,7 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
       tests.push({ name, order, gasUsed, values, avgValue })
     }
     return tests
-  }, [runs, suiteOrder, stepFilter, activeTab, blockLogsPerRun])
+  }, [runs, suiteOrder, stepFilter, activeTab, blockLogsPerRun, isProving])
 
   const filteredTests = useMemo(() => {
     if (!testNameFilter) return comparedTests
@@ -341,7 +350,7 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
                     : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600',
                 )}
               >
-                <img src={`/img/clients/${run.config.instance.client}.jpg`} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
+                <img src={getClientLogoUrl(run.config.instance.client)} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
                 {formatRunLabel(slot, run, labelMode)}
               </button>
             )
@@ -373,7 +382,7 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
                     )}
                   >
                     <div className="flex flex-col items-end gap-1" title={formatRunLabel(slot, run, labelMode)}>
-                      <img src={`/img/clients/${run.config.instance.client}.jpg`} alt={run.config.instance.client} className="size-5 rounded-full object-cover" />
+                      <img src={getClientLogoUrl(run.config.instance.client)} alt={run.config.instance.client} className="size-5 rounded-full object-cover" />
                       <span className="inline-flex items-center">
                         {slot.label}
                         {isSortable && <SortIcon direction={isActive ? sortDir : 'asc'} active={isActive} />}
@@ -422,25 +431,39 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
                       : undefined
                     return (
                       <td key={RUN_SLOTS[i].label} className="whitespace-nowrap px-4 py-2 text-right text-sm/6">
-                        {val !== undefined ? (
-                          <Link
-                            to="/runs/$runId"
-                            params={{ runId: runs[i].runId }}
-                            search={{ testModal: test.name }}
-                            target="_blank"
-                            className="block hover:underline"
-                          >
-                            <div className={isRef ? 'font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}>
-                              {activeMetric.format(val)}
-                            </div>
-                            {diff !== undefined && !isRef && refValue! > 0 && (
-                              <div className="text-xs/4" style={{ color: getDiffColor(diff, refValue!) }}>
-                                {diff >= 0 ? '+' : '-'}{activeMetric.format(Math.abs(diff))}
-                                {' '}({diff >= 0 ? '+' : '-'}{((Math.abs(diff) / refValue!) * 100).toFixed(1)}%)
+                        {val !== undefined ? (() => {
+                          const cell = (
+                            <>
+                              <div className={isRef ? 'font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}>
+                                {activeMetric.format(val)}
                               </div>
-                            )}
-                          </Link>
-                        ) : (
+                              {diff !== undefined && !isRef && refValue! > 0 && (
+                                <div className="text-xs/4" style={{ color: getDiffColor(diff, refValue!) }}>
+                                  {diff >= 0 ? '+' : '-'}{activeMetric.format(Math.abs(diff))}
+                                  {' '}({diff >= 0 ? '+' : '-'}{((Math.abs(diff) / refValue!) * 100).toFixed(1)}%)
+                                </div>
+                              )}
+                            </>
+                          )
+
+                          // Averaged groups have no run page behind their
+                          // synthetic ids, so their cells stay plain.
+                          if (runs[i].runId.startsWith('group-')) {
+                            return <div className="block">{cell}</div>
+                          }
+
+                          return (
+                            <Link
+                              to="/runs/$runId"
+                              params={{ runId: runs[i].runId }}
+                              search={{ testModal: test.name }}
+                              target="_blank"
+                              className="block hover:underline"
+                            >
+                              {cell}
+                            </Link>
+                          )
+                        })() : (
                           <div className="text-gray-500 dark:text-gray-400">-</div>
                         )}
                       </td>

@@ -70,7 +70,7 @@ function RunCard({
         <StatusBadge status={config.status} />
       </div>
       <div className="flex items-center gap-3">
-        <ClientBadge client={config.instance.client} />
+        <ClientBadge client={config.instance.client} metadata={config.metadata?.labels} />
         <StrategyIcon strategy={config.instance.rollback_strategy} />
       </div>
       <div className="mt-3 flex flex-col gap-1">

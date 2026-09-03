@@ -23,6 +23,7 @@ import { GroupBuilder } from '@/components/compare/GroupBuilder'
 import { type GroupDef, parseGroupsParam, encodeGroupsParam } from '@/components/compare/groupUtils'
 import { averageResults } from '@/utils/averageResults'
 import { TestDetailModal } from '@/components/compare/TestDetailModal'
+import { getClientLogoUrl } from '@/utils/client-colors'
 
 function parseStepFilter(param: string | undefined): StepTypeOption[] {
   if (!param) return DEFAULT_STEP_FILTER
@@ -459,7 +460,7 @@ export function CompareGroupsPage() {
                 const runCount = groupRuns[gi]?.length ?? 0
                 return (
                   <span key={gi} className="inline-flex items-center gap-1.5 rounded-sm bg-gray-100 px-2 py-0.5 text-xs/5 font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200">
-                    <img src={`/img/clients/${group.client}.jpg`} alt={group.client} className="size-3.5 rounded-full object-cover" />
+                    <img src={getClientLogoUrl(group.client)} alt={group.client} className="size-3.5 rounded-full object-cover" />
                     {metaStr || group.client}
                     <span className="font-mono text-gray-400 dark:text-gray-500" title={`${runCount} run${runCount === 1 ? '' : 's'} sampled`}>
                       ({runCount})

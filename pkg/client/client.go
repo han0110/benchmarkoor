@@ -16,6 +16,7 @@ const (
 	ClientNimbus     ClientType = "nimbus"
 	ClientReth       ClientType = "reth"
 	ClientEthrex     ClientType = "ethrex"
+	ClientProvoor    ClientType = "provoor"
 )
 
 // RollbackMethodType identifies how a client performs state rollback.
@@ -134,6 +135,7 @@ func NewRegistry() Registry {
 	r.Register(NewNimbusSpec())
 	r.Register(NewRethSpec())
 	r.Register(NewEthrexSpec())
+	r.Register(NewProvoorSpec())
 
 	return r
 }

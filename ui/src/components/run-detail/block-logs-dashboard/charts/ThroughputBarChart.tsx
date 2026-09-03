@@ -13,9 +13,11 @@ interface ThroughputBarChartProps {
   useLogScale: boolean
   onTestClick?: (testName: string) => void
   activeCategories?: TestCategory[]
+  /** Names the measured time, "Execution" or "Proving". */
+  timeLabel: string
 }
 
-export function ThroughputBarChart({ data, isDark, useLogScale, onTestClick, activeCategories }: ThroughputBarChartProps) {
+export function ThroughputBarChart({ data, isDark, useLogScale, onTestClick, activeCategories, timeLabel }: ThroughputBarChartProps) {
   const categoriesToShow = activeCategories ?? ALL_CATEGORIES
   const [sortMode, setSortMode] = useState<SortMode>('throughput')
   const { mode: nameMode } = useNameDisplayMode()
@@ -56,7 +58,7 @@ export function ThroughputBarChart({ data, isDark, useLogScale, onTestClick, act
             <strong>Test ${testLabel}</strong><br/>
             <span style="font-size: 11px; color: ${isDark ? '#9ca3af' : '#6b7280'}; word-break: break-all; display: block;">${formatTestNameLong(item.testName, nameMode)}</span><br/>
             Throughput: ${item.throughput.toFixed(2)} MGas/s<br/>
-            Execution: ${item.executionMs.toFixed(2)}ms<br/>
+            ${timeLabel}: ${item.executionMs.toFixed(2)}ms<br/>
             <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background-color:${CATEGORY_COLORS[item.category]};margin-right:6px;vertical-align:middle;"></span>${item.category.charAt(0).toUpperCase() + item.category.slice(1)}
           `
         },
@@ -146,7 +148,7 @@ export function ThroughputBarChart({ data, isDark, useLogScale, onTestClick, act
         })),
       ],
     }
-  }, [chartData, isDark, useLogScale, sortMode, textColor, subTextColor, gridColor, tooltipBg, tooltipBorder, categoriesToShow, nameMode])
+  }, [chartData, isDark, useLogScale, sortMode, textColor, subTextColor, gridColor, tooltipBg, tooltipBorder, categoriesToShow, nameMode, timeLabel])
 
   const onEvents = useMemo(() => {
     if (!onTestClick) return undefined

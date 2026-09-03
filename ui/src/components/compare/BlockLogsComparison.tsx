@@ -5,6 +5,8 @@ import type { BlockLogs, SuiteTest } from '@/api/types'
 import { type CompareRun, type LabelMode, RUN_SLOTS, formatRunLabel } from './constants'
 import { formatTestNameLong } from '@/utils/eestName'
 import { useNameDisplayMode } from '@/hooks/useNameDisplayMode'
+import { getClientLogoUrl } from '@/utils/client-colors'
+import { isProvingRun, measuredTimeLabel, measuredTimeMs } from '@/utils/blockLogs'
 
 function useDarkMode() {
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'))
@@ -63,6 +65,7 @@ function buildUnifiedTestList(
 function buildBlockLogDataPoints(
   blockLogs: BlockLogs,
   unifiedTests: string[],
+  isProving: boolean,
 ): BlockLogDataPoint[] {
   const points: BlockLogDataPoint[] = []
   unifiedTests.forEach((testName, index) => {
@@ -72,7 +75,7 @@ function buildBlockLogDataPoints(
       testIndex: index + 1,
       testName,
       throughput: entry.throughput?.mgas_per_sec ?? 0,
-      executionMs: entry.timing?.execution_ms ?? 0,
+      executionMs: measuredTimeMs(entry, isProving),
       overheadMs: (entry.timing?.state_read_ms ?? 0) + (entry.timing?.state_hash_ms ?? 0) + (entry.timing?.commit_ms ?? 0),
       accountCacheHitRate: entry.cache?.account?.hit_rate ?? 0,
       storageCacheHitRate: entry.cache?.storage?.hit_rate ?? 0,
@@ -126,6 +129,10 @@ interface BlockLogsComparisonProps {
 
 export function BlockLogsComparison({ runs, blockLogsPerRun, blockLogsLoading, suiteTests, labelMode, testNameFilter }: BlockLogsComparisonProps) {
   const { mode: nameMode } = useNameDisplayMode()
+  // The compare page rejects a set mixing proving and executing runs, so one
+  // flag describes every run reaching these charts.
+  const isProving = useMemo(() => runs.some((run) => isProvingRun(run.config)), [runs])
+  const timeLabel = measuredTimeLabel(isProving)
   const isDark = useDarkMode()
   const [zoomRange, setZoomRange] = useState({ start: 0, end: 100 })
   const prevZoomRef = useRef(zoomRange)
@@ -143,8 +150,8 @@ export function BlockLogsComparison({ runs, blockLogsPerRun, blockLogsLoading, s
   )
 
   const pointsPerRun = useMemo(
-    () => blockLogsPerRun.map((bl) => (bl ? buildBlockLogDataPoints(bl, unifiedTests) : [])),
-    [blockLogsPerRun, unifiedTests],
+    () => blockLogsPerRun.map((bl) => (bl ? buildBlockLogDataPoints(bl, unifiedTests, isProving) : [])),
+    [blockLogsPerRun, unifiedTests, isProving],
   )
 
   const hasAnyData = blockLogsPerRun.some((bl) => bl !== null)
@@ -257,7 +264,7 @@ export function BlockLogsComparison({ runs, blockLogsPerRun, blockLogsLoading, s
         visible.forEach((p) => {
           const value = p.value[1] as number
           const client = clientBySeriesName.get(p.seriesName)
-          const clientImg = client ? `<img src="/img/clients/${client}.jpg" style="display:inline-block;width:14px;height:14px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;" />` : ''
+          const clientImg = client ? `<img src="${getClientLogoUrl(client)}" style="display:inline-block;width:14px;height:14px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;" />` : ''
           content += `${clientImg}<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background-color:${p.color};margin-right:6px;vertical-align:middle;"></span>${p.seriesName}: ${formatter(value)}<br/>`
         })
         return content
@@ -328,7 +335,7 @@ export function BlockLogsComparison({ runs, blockLogsPerRun, blockLogsLoading, s
             const slot = RUN_SLOTS[run.index]
             return (
               <span key={slot.label} className={`inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 font-medium ${slot.badgeBgClass} ${slot.badgeTextClass}`}>
-                <img src={`/img/clients/${run.config.instance.client}.jpg`} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
+                <img src={getClientLogoUrl(run.config.instance.client)} alt={run.config.instance.client} className="size-3.5 rounded-full object-cover" />
                 {formatRunLabel(slot, run, labelMode)}
               </span>
             )
@@ -345,7 +352,7 @@ export function BlockLogsComparison({ runs, blockLogsPerRun, blockLogsLoading, s
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ChartSection title="Throughput (MGas/s)" option={chartOptions.throughput} onZoom={handleZoom} />
-        <ChartSection title="Execution Time (ms)" option={chartOptions.executionMs} onZoom={handleZoom} />
+        <ChartSection title={`${timeLabel} Time (ms)`} option={chartOptions.executionMs} onZoom={handleZoom} />
         <ChartSection title="Overhead — State Read/Hash/Commit (ms)" option={chartOptions.overheadMs} onZoom={handleZoom} />
         <ChartSection title="Account Cache Hit Rate (%)" option={chartOptions.accountCacheHitRate} onZoom={handleZoom} />
         <ChartSection title="Storage Cache Hit Rate (%)" option={chartOptions.storageCacheHitRate} onZoom={handleZoom} />

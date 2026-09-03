@@ -79,7 +79,7 @@ export function BlockLogDetails({ blockLog }: BlockLogDetailsProps) {
   const textColor = isDark ? '#e5e7eb' : '#374151'
   const subTextColor = isDark ? '#9ca3af' : '#6b7280'
 
-  const { timing, throughput, state_reads, state_writes, cache } = blockLog
+  const { timing, throughput, state_reads, state_writes, cache, clusterReportedProvingTimeMs, statelessInputSize, proofSize } = blockLog
   const hasTiming = timing != null && timing.total_ms != null
   const hasOverhead = hasTiming && timing.state_read_ms != null && timing.state_hash_ms != null && timing.commit_ms != null
   const hasCache = cache != null && cache.account != null && cache.storage != null && cache.code != null
@@ -396,6 +396,14 @@ export function BlockLogDetails({ blockLog }: BlockLogDetailsProps) {
           label="Total Time"
           value={timing?.total_ms != null ? `${timing.total_ms.toFixed(1)}ms` : 'N/A'}
         />
+        {/* Only proving clients report a cluster time. */}
+        {clusterReportedProvingTimeMs != null && (
+          <MetricCard
+            label="Cluster Proving"
+            value={`${clusterReportedProvingTimeMs.toFixed(1)}ms`}
+            subValue="reported by cluster"
+          />
+        )}
         <MetricCard
           label="Gas Used"
           value={blockLog.block.gas_used != null ? formatGas(blockLog.block.gas_used) : 'N/A'}
@@ -404,6 +412,13 @@ export function BlockLogDetails({ blockLog }: BlockLogDetailsProps) {
           label="Transactions"
           value={blockLog.block.tx_count != null ? blockLog.block.tx_count.toString() : 'N/A'}
         />
+        {/* Only proving clients report these sizes. */}
+        {statelessInputSize != null && (
+          <MetricCard label="Stateless Input" value={formatBytes(statelessInputSize)} />
+        )}
+        {proofSize != null && (
+          <MetricCard label="Proof Size" value={formatBytes(proofSize)} />
+        )}
       </div>
 
       {/* Timing Breakdown — only shown when timing data exists */}

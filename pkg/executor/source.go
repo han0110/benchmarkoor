@@ -49,7 +49,7 @@ type TestWithSteps struct {
 	Cleanup     *StepFile         // Optional cleanup step
 	GenesisHash string            // Genesis hash from pre_alloc (empty if single-genesis)
 	EESTInfo    *eest.FixtureInfo // EEST fixture metadata (nil for non-EEST sources)
-	OpcodeCount map[string]int    // External opcode counts (nil if not provided)
+	OpcodeCount map[string]int    // Opcode counts from an external source or the fixture (nil if neither)
 }
 
 // PreparedSource contains the prepared test source with all discovered tests.

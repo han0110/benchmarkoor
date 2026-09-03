@@ -5,6 +5,7 @@ import { Duration } from '@/components/shared/Duration'
 import { formatDuration, formatNumber } from '@/utils/format'
 import { formatDurationSeconds } from '@/utils/date'
 import { type CompareRun, type LabelMode, RUN_SLOTS, formatRunLabel } from './constants'
+import { getClientLogoUrl } from '@/utils/client-colors'
 
 interface MetricsComparisonProps {
   runs: CompareRun[]
@@ -124,7 +125,7 @@ function MetricCard({
             return (
               <tr key={slot.label}>
                 <td className="w-5 py-0.5 align-middle">
-                  <img src={`/img/clients/${clients[i]}.jpg`} alt={clients[i]} className="size-4 rounded-full object-cover" />
+                  <img src={getClientLogoUrl(clients[i])} alt={clients[i]} className="size-4 rounded-full object-cover" />
                 </td>
                 <td className={clsx('py-0.5 align-middle text-xs/5 font-semibold', slot.textClass, `dark:${slot.textDarkClass.replace('text-', 'text-')}`)}>
                   {runLabels[i]}
@@ -183,7 +184,7 @@ export function MetricsComparison({ runs, stepFilter, baselineIdx, onBaselineCha
                 )}
               >
                 <img
-                  src={`/img/clients/${run.config.instance.client}.jpg`}
+                  src={getClientLogoUrl(run.config.instance.client)}
                   alt={run.config.instance.client}
                   className="size-3.5 rounded-full object-cover"
                 />

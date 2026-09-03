@@ -287,8 +287,9 @@ func (r *runner) runContainerLifecycle(
 		}).Info("Applied genesis EIP-time overrides")
 	}
 
-	// Fail if neither genesis nor datadir is configured.
-	if genesisSource == "" && !useDataDir {
+	// Fail if neither genesis nor datadir is configured, unless the client
+	// spec declares that it reads no chain data.
+	if spec.GenesisPath() != "" && genesisSource == "" && !useDataDir {
 		return fmt.Errorf(
 			"no genesis file or datadir configured for client %s",
 			instance.Client,

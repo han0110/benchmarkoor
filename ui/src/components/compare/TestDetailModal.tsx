@@ -8,6 +8,7 @@ import { TestName } from '@/components/shared/TestName'
 import { formatTimestamp } from '@/utils/date'
 import { type GroupDef } from './groupUtils'
 import { MAX_COMPARE_RUNS, MIN_COMPARE_RUNS } from './constants'
+import { getClientLogoUrl } from '@/utils/client-colors'
 
 interface TestDetailModalProps {
   testName: string
@@ -170,7 +171,7 @@ export function TestDetailModal({
                 {/* Group header */}
                 <div className="flex items-center gap-2">
                   <img
-                    src={`/img/clients/${group.client}.jpg`}
+                    src={getClientLogoUrl(group.client)}
                     alt={group.client}
                     className="size-5 rounded-full object-cover"
                   />

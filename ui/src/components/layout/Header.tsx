@@ -318,8 +318,8 @@ export function Header() {
     <header className="border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
       <div className="mx-auto flex max-w-7xl items-center gap-8 px-4 py-2">
         <Link to="/runs" search={{}} className="flex items-center gap-2">
-          <img src="/img/logo_black.png" alt="Benchmarkoor" className="h-12 dark:hidden" />
-          <img src="/img/logo_white.png" alt="Benchmarkoor" className="hidden h-12 dark:block" />
+          <img src={`${import.meta.env.BASE_URL}img/logo_black.png`} alt="Benchmarkoor" className="h-12 dark:hidden" />
+          <img src={`${import.meta.env.BASE_URL}img/logo_white.png`} alt="Benchmarkoor" className="hidden h-12 dark:block" />
           <span className="text-lg/7 font-semibold text-gray-900 dark:text-gray-100">Benchmarkoor</span>
         </Link>
 

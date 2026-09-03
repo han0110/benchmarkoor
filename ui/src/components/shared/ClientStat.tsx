@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { getClientColors } from '@/utils/client-colors'
+import { getClientColors, getClientLogoUrl } from '@/utils/client-colors'
 import { StrategyIcon } from '@/components/shared/StrategyIcon'
 
 interface ClientStatProps {
@@ -15,7 +15,7 @@ function capitalizeFirst(str: string): string {
 
 export function ClientStat({ client, runId, rollbackStrategy }: ClientStatProps) {
   const colors = getClientColors(client)
-  const logoPath = `/img/clients/${client}.jpg`
+  const logoPath = getClientLogoUrl(client)
 
   return (
     <div
@@ -38,7 +38,7 @@ export function ClientStat({ client, runId, rollbackStrategy }: ClientStatProps)
       <div className="flex items-end justify-between">
         <div>
           <p className={clsx('text-xs/5', colors.text, colors.darkText, 'opacity-70')}>
-            Run id
+            Instance
           </p>
           <p className={clsx('text-xs/5', colors.text, colors.darkText)}>
             {runId}

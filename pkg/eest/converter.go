@@ -2,8 +2,13 @@ package eest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 )
+
+// ErrNoStatelessInput reports a fixture whose benchmark block carries no
+// stateless input, which callers skip rather than fail.
+var ErrNoStatelessInput = errors.New("no stateless input bytes")
 
 // ConvertedTest represents a test converted from EEST fixture format.
 type ConvertedTest struct {
@@ -133,6 +138,66 @@ func ConvertStatefulFixture(name string, fixture *Fixture, preRun *StatefulPreRu
 	}
 
 	return result, nil
+}
+
+// ConvertStatelessFixture converts a blockchain-test fixture carrying
+// stateless validation bytes into a single engine_proveStatelessValidator call.
+// The last block is the benchmark block and the stateless input already
+// encodes everything before it, so only the last block is proven. A fixture
+// whose last block has no stateless input answers ErrNoStatelessInput.
+func ConvertStatelessFixture(name string, fixture *Fixture) (*ConvertedTest, error) {
+	if fixture == nil {
+		return nil, fmt.Errorf("fixture is nil")
+	}
+
+	if len(fixture.Blocks) == 0 {
+		return nil, fmt.Errorf("fixture has no blocks")
+	}
+
+	block := fixture.Blocks[len(fixture.Blocks)-1]
+	if block.StatelessInputBytes == "" || block.StatelessInputBytes == "0x" {
+		return nil, ErrNoStatelessInput
+	}
+
+	if block.StatelessOutputBytes == "" {
+		return nil, fmt.Errorf("last block has statelessInputBytes but no statelessOutputBytes")
+	}
+
+	if block.BlockHeader == nil || block.BlockHeader.Hash == "" {
+		return nil, fmt.Errorf("last block has no header hash")
+	}
+
+	// blockHash, blockNumber and gasUsed carry the Engine API names so the
+	// executor's block payload extractors read them exactly as they read an
+	// engine_newPayload call. gasUsed is what MGas/s is computed from, and
+	// blockHash is how emitted block logs match back to their test.
+	payload := map[string]string{
+		"blockHash":               block.BlockHeader.Hash,
+		"blockNumber":             block.BlockHeader.Number,
+		"gasUsed":                 block.BlockHeader.GasUsed,
+		"statelessInput":          block.StatelessInputBytes,
+		"expectedStatelessOutput": block.StatelessOutputBytes,
+	}
+
+	rpcCall := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "engine_proveStatelessValidator",
+		"params":  []any{payload},
+		"id":      1,
+	}
+
+	data, err := json.Marshal(rpcCall)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling JSON-RPC call: %w", err)
+	}
+
+	return &ConvertedTest{
+		Name:         name,
+		SetupLines:   make([]string, 0),
+		TestLines:    []string{string(data)},
+		FinalHash:    block.BlockHeader.Hash,
+		PayloadCount: 1,
+	}, nil
 }
 
 // preRunPayloadCount returns the number of pre_run payloads, tolerating a nil
