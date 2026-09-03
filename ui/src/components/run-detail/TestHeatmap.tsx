@@ -11,6 +11,7 @@ import { TimeBreakdown } from './TimeBreakdown'
 import { MGasBreakdown } from './MGasBreakdown'
 import { ExecutionsList } from './ExecutionsList'
 import { BlockLogDetails } from './BlockLogDetails'
+import { TestRemoteMetrics } from './TestRemoteMetrics'
 import type { TestStatusFilter } from './TestsTable'
 import { type StepTypeOption, ALL_STEP_TYPES } from '@/pages/RunDetailPage'
 import { formatDuration, formatBytes } from '@/utils/format'
@@ -1045,6 +1046,7 @@ export function TestHeatmap({
               {postTestRPCCalls && postTestRPCCalls.length > 0 && (
                 <PostTestDumps runId={runId} testName={selectedTest} calls={postTestRPCCalls} />
               )}
+              <TestRemoteMetrics runId={runId} testName={selectedTest} />
             </div>
           </Modal>
         )

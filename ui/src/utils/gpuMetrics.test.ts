@@ -229,10 +229,26 @@ describe('reduceGpuMetrics', () => {
   })
 
   it('reports the slowest refreshing GPU', () => {
-    const stale = withCells(idle, { updates: 0 })
+    const stale = withCells(busy, { device: 1, updates: 0 })
     const { dataPoints } = reduceGpuMetrics({ ...metrics, tests: { 'b.json': { '0x1': [busy, stale] } } })
 
     expect(dataPoints[0].refreshRatio).toBe(0)
+  })
+
+  it('leaves an idle GPU out of the refresh ratio', () => {
+    const stale = withCells(idle, { updates: 0 })
+    const { dataPoints, summary } = reduceGpuMetrics({ ...metrics, tests: { 'b.json': { '0x1': [busy, stale] } } })
+
+    expect(dataPoints[0].refreshRatio).toBeCloseTo(100)
+    expect(summary.meanRefreshRatio).toBeCloseTo(100)
+  })
+
+  it('leaves the refresh ratio unmeasured when no GPU of the block did work', () => {
+    const stale = withCells(idle, { updates: 0 })
+    const { dataPoints, summary } = reduceGpuMetrics({ ...metrics, tests: { 'a.json': { '0x2': [busy] }, 'b.json': { '0x1': [stale] } } })
+
+    expect(dataPoints.find((p) => p.testName === 'b.json')!.refreshRatio).toBeNull()
+    expect(summary.meanRefreshRatio).toBeCloseTo(100)
   })
 
   it('bounds the throttled share when power and heat overlap', () => {

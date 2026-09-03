@@ -50,3 +50,15 @@ func TestResolveTestName(t *testing.T) {
 	// No marker → falls back to the directory path.
 	assert.Equal(t, "some/dir", resolveTestName(dir, "some/dir", cache))
 }
+
+func TestWriteTestFile(t *testing.T) {
+	dir := t.TempDir()
+	full := "benchmark/stateful/bloatnet/test_x.py::test_y[" + strings.Repeat("p", 400) + "]"
+
+	require.NoError(t, WriteTestFile(dir, full, "test.remote-metrics.json.gz", []byte("gz"), nil))
+
+	// The file sits in the directory WriteStepResults uses, sanitized alike.
+	data, err := os.ReadFile(dir + "/" + sanitizeResultPath(full) + "/test.remote-metrics.json.gz")
+	require.NoError(t, err)
+	assert.Equal(t, "gz", string(data))
+}

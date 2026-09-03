@@ -74,8 +74,8 @@ export interface GpuDataPoint {
   fbUsedGiB: number | null
   fbTotalGiB: number | null
   tempMargin: number | null
-  /** Share of scrapes that carried a fresh value, on the slowest GPU. */
-  refreshRatio: number
+  /** Share of scrapes that carried a fresh value, on the slowest GPU that did work. */
+  refreshRatio: number | null
 }
 
 export interface GpuSummary {
@@ -93,7 +93,7 @@ export interface GpuSummary {
   /** Share of all GPU time in the run spent throttled, by power or by heat. */
   throttledShare: number | null
   pcieReplays: number | null
-  meanRefreshRatio: number
+  meanRefreshRatio: number | null
 }
 
 export interface GpuMetricsView {
@@ -139,11 +139,11 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
     minTempMargin: null,
     throttledShare: null,
     pcieReplays: null,
-    meanRefreshRatio: 0,
+    meanRefreshRatio: null,
   }
   const smActiveBlocks: number[] = []
   const wattsBlocks: number[] = []
-  let refreshSum = 0
+  const refreshBlocks: number[] = []
   let throttledNs = 0
   let deviceNs = 0
 
@@ -188,15 +188,20 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
         fbUsedGiB: scaled(max(measured(rows, COLUMN.fbUsed, GAUGE_SCALE)), 1 / 1024),
         fbTotalGiB: scaled(max(measured(rows, COLUMN.fbTotal, GAUGE_SCALE)), 1 / 1024),
         tempMargin: min(measured(rows, COLUMN.tempMargin, GAUGE_SCALE)),
-        refreshRatio:
-          min(rows.map((row) => refreshRatio(cell(row, LEADING.scrapes) ?? 0, cell(row, LEADING.updates) ?? 0))) ?? 0,
+        // The source refreshes an idle GPU at its own slower pace, so only
+        // the GPUs that did work in the block measure how fast it kept up.
+        refreshRatio: min(
+          rows
+            .filter((row) => (cell(row, COLUMN.smActive) ?? 0) > 0)
+            .map((row) => refreshRatio(cell(row, LEADING.scrapes) ?? 0, cell(row, LEADING.updates) ?? 0)),
+        ),
       }
       points.push(point)
 
       summary.blocks++
       if (point.smActive !== null) smActiveBlocks.push(point.smActive)
       if (point.meanWatts !== null) wattsBlocks.push(point.meanWatts)
-      refreshSum += point.refreshRatio
+      if (point.refreshRatio !== null) refreshBlocks.push(point.refreshRatio)
       summary.peakSmActive = higher(summary.peakSmActive, point.busiestSmActive)
       summary.peakWatts = higher(summary.peakWatts, point.peakWatts)
       summary.powerLimit = higher(summary.powerLimit, point.powerLimit)
@@ -222,9 +227,7 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
 
   summary.meanSmActive = mean(smActiveBlocks)
   summary.meanWatts = mean(wattsBlocks)
-  if (summary.blocks > 0) {
-    summary.meanRefreshRatio = refreshSum / summary.blocks
-  }
+  summary.meanRefreshRatio = mean(refreshBlocks)
   if (deviceNs > 0) {
     summary.throttledShare = (throttledNs / deviceNs) * 100
   }

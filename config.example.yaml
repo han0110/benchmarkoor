@@ -65,7 +65,10 @@ runner:
   # endpoint, dcgm-exporter or node-exporter, selects the series recorded and
   # the file they land in, result.device-metrics.json or
   # result.node-metrics.json. Counters are subtracted over the window and
-  # gauges are averaged.
+  # gauges are averaged. A test with readings in its window also gets them
+  # raw, one row per source refresh, as test.remote-metrics.json.gz beside
+  # its step results. A call that failed without a retry gets that raw file
+  # too, while the reduced files hold proved blocks only.
   # remote_metrics:
   #   enabled: true
   #   interval: 100ms   # default 100ms; raise it if scraping costs test time

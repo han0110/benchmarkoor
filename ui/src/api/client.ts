@@ -33,19 +33,24 @@ export async function fetchViaS3(
   return fetch(presignedUrl, { ...init, cache: 'no-cache' })
 }
 
-export async function fetchData<T>(path: string, opts?: { cacheBustInterval?: number }): Promise<FetchResult<T>> {
+// Fetches a data path the way the runtime config demands, through the S3
+// presign, with credentials on the local backend, or plainly.
+async function fetchResponse(path: string, cacheBustInterval?: number): Promise<Response> {
   const config = await loadRuntimeConfig()
   const url = getDataUrl(path, config)
 
-  let response: Response
-
   if (isS3Mode(config)) {
-    response = await fetchViaS3(url, undefined, opts?.cacheBustInterval)
-  } else if (isLocalMode(config)) {
-    response = await fetch(cacheBustUrl(url, opts?.cacheBustInterval), { credentials: 'include' })
-  } else {
-    response = await fetch(cacheBustUrl(url, opts?.cacheBustInterval))
+    return fetchViaS3(url, undefined, cacheBustInterval)
   }
+  if (isLocalMode(config)) {
+    return fetch(cacheBustUrl(url, cacheBustInterval), { credentials: 'include' })
+  }
+
+  return fetch(cacheBustUrl(url, cacheBustInterval))
+}
+
+export async function fetchData<T>(path: string, opts?: { cacheBustInterval?: number }): Promise<FetchResult<T>> {
+  const response = await fetchResponse(path, opts?.cacheBustInterval)
 
   if (!response.ok) {
     return { data: null, status: response.status }
@@ -59,6 +64,32 @@ export async function fetchData<T>(path: string, opts?: { cacheBustInterval?: nu
 
   const data = await response.json()
   return { data, status: response.status }
+}
+
+// Fetches a gzip compressed JSON file. A server that applied Content-Encoding
+// has already inflated the body, so the gzip magic bytes decide whether to
+// inflate here.
+export async function fetchGzipJson<T>(path: string): Promise<FetchResult<T>> {
+  const response = await fetchResponse(path)
+
+  if (!response.ok) {
+    return { data: null, status: response.status }
+  }
+
+  const body = await response.arrayBuffer()
+  const bytes = new Uint8Array(body)
+  const isGzip = bytes[0] === 0x1f && bytes[1] === 0x8b
+  const inflated = isGzip
+    ? await new Response(new Blob([body]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
+    : body
+  const text = new TextDecoder().decode(inflated)
+
+  // SPA servers may return 200 with HTML for missing files
+  if (/^\s*<(!doctype|html)/i.test(text)) {
+    return { data: null, status: 404 }
+  }
+
+  return { data: JSON.parse(text), status: response.status }
 }
 
 export interface HeadResult {

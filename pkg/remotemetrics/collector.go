@@ -96,6 +96,12 @@ func measured(value int64) *int64 {
 type Collector struct {
 	scraper *Scraper
 
+	// TestWriter receives the readings of every settled window, proved block
+	// or failed attempt, as the per test artifact, keyed by the test file.
+	// Left nil, no per test file is written. A test with more than one window
+	// keeps the last.
+	TestWriter func(testFile string, data []byte)
+
 	mu      sync.Mutex
 	tables  map[string]*table
 	blocks  int
@@ -129,12 +135,14 @@ func (c *Collector) table(exporter string) *table {
 	return t
 }
 
-// pending is a block window waiting for the samples that cover it.
+// pending is a window waiting for the samples that cover it. Only a proved
+// block reduces into the artifact tables, an attempt yields its trace alone.
 type pending struct {
 	testFile  string
 	blockHash string
 	start     time.Time
 	end       time.Time
+	proved    bool
 }
 
 // NewCollector builds a collector over a running scraper.
@@ -147,12 +155,23 @@ func NewCollector(scraper *Scraper) *Collector {
 // and the window cannot be reduced yet. Every queued window is retried as
 // later blocks arrive and once more before the artifact is written.
 func (c *Collector) RecordBlock(testFile, blockHash string, start, end time.Time) {
+	c.record(testFile, blockHash, start, end, true)
+}
+
+// RecordAttempt queues the window of a call that failed without a retry. The
+// test receives its trace, so the readings around the failure can be read,
+// while the artifact tables stay limited to proved blocks.
+func (c *Collector) RecordAttempt(testFile, blockHash string, start, end time.Time) {
+	c.record(testFile, blockHash, start, end, false)
+}
+
+func (c *Collector) record(testFile, blockHash string, start, end time.Time, proved bool) {
 	if !end.After(start) {
 		return
 	}
 
 	c.mu.Lock()
-	c.pending = append(c.pending, pending{testFile: testFile, blockHash: blockHash, start: start, end: end})
+	c.pending = append(c.pending, pending{testFile: testFile, blockHash: blockHash, start: start, end: end, proved: proved})
 	c.mu.Unlock()
 
 	c.flush()
@@ -186,31 +205,39 @@ func (c *Collector) flush() {
 			return
 		}
 
-		windows := c.scraper.Reduce(block.start, block.end)
-		if len(windows) == 0 {
-			c.mu.Lock()
-			c.dropped++
-			c.mu.Unlock()
+		if block.proved {
+			windows := c.scraper.Reduce(block.start, block.end)
+			if len(windows) == 0 {
+				c.mu.Lock()
+				c.dropped++
+				c.mu.Unlock()
 
-			continue
-		}
-
-		c.mu.Lock()
-		rows := map[string][][]*int64{}
-		for _, window := range windows {
-			rows[window.Exporter] = append(rows[window.Exporter], c.row(window, block.end.Sub(block.start)))
-		}
-
-		for exporter, exporterRows := range rows {
-			t := c.table(exporter)
-			if t.tests[block.testFile] == nil {
-				t.tests[block.testFile] = map[string][][]*int64{}
+				continue
 			}
-			t.tests[block.testFile][block.blockHash] = exporterRows
+
+			c.mu.Lock()
+			rows := map[string][][]*int64{}
+			for _, window := range windows {
+				rows[window.Exporter] = append(rows[window.Exporter], c.row(window, block.end.Sub(block.start)))
+			}
+
+			for exporter, exporterRows := range rows {
+				t := c.table(exporter)
+				if t.tests[block.testFile] == nil {
+					t.tests[block.testFile] = map[string][][]*int64{}
+				}
+				t.tests[block.testFile][block.blockHash] = exporterRows
+			}
+
+			c.blocks++
+			c.mu.Unlock()
 		}
 
-		c.blocks++
-		c.mu.Unlock()
+		if c.TestWriter != nil {
+			if traces := c.scraper.Trace(block.start, block.end); len(traces) > 0 {
+				c.TestWriter(block.testFile, encodeTraces(traces))
+			}
+		}
 	}
 }
 
@@ -241,14 +268,21 @@ func (c *Collector) Settle(timeout time.Duration) {
 const settlePollInterval = 10 * time.Millisecond
 
 // Dropped reports how many block windows carried no usable samples, so a
-// caller can say plainly that telemetry was incomplete.
+// caller can say plainly that telemetry was incomplete. A queued attempt is
+// not one of them, since it holds no artifact row to lose.
 func (c *Collector) Dropped() int {
 	c.flush()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	return c.dropped + len(c.pending)
+	dropped := c.dropped
+	for _, block := range c.pending {
+		if block.proved {
+			dropped++
+		}
+	}
+	return dropped
 }
 
 // row renders one window into the columnar form of its exporter, adding any

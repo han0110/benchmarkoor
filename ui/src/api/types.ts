@@ -737,3 +737,16 @@ export interface DeviceMetrics {
   /** test file -> block hash -> one row per device. */
   tests: Record<string, Record<string, Array<Array<number | null>>>>
 }
+
+export interface TestRemoteMetricsExporter {
+  columns: string[]
+  devices: DeviceMetricDevice[]
+  /** samples[i] holds the rows of devices[i] in time order, one per refresh inside the proving window. */
+  samples: Array<Array<Array<number | null>>>
+}
+
+export interface TestRemoteMetrics {
+  schemaVersion: number
+  /** exporter name -> the devices it scraped and their rows. */
+  exporters: Record<string, TestRemoteMetricsExporter>
+}

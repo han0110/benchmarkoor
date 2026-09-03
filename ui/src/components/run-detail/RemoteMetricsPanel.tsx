@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, type ReactNode } from 'react'
+import clsx from 'clsx'
 import ReactECharts from 'echarts-for-react'
 import { Zap } from 'lucide-react'
 
@@ -21,7 +22,7 @@ interface ChartSectionProps {
   option: object
   onZoom: (start: number, end: number) => void
   onPointClick?: (testName: string) => void
-  highlightedTestRef: React.MutableRefObject<string | null>
+  highlightedTestRef?: React.MutableRefObject<string | null>
 }
 
 export function ChartSection({ title, option, onZoom, onPointClick, highlightedTestRef }: ChartSectionProps) {
@@ -53,7 +54,7 @@ export function ChartSection({ title, option, onZoom, onPointClick, highlightedT
           return
         }
       }
-      if (onPointClick && highlightedTestRef.current) {
+      if (onPointClick && highlightedTestRef?.current) {
         onPointClick(highlightedTestRef.current)
       }
     },
@@ -87,12 +88,14 @@ interface RemoteMetricsPanelProps {
   cards: ReactNode
   charts: ReactNode
   footer: string
+  /** Drops the card surface, for a panel that sits inside another one. */
+  embedded?: boolean
 }
 
-export function RemoteMetricsPanel({ title, source, sourceTitle, cards, charts, footer }: RemoteMetricsPanelProps) {
+export function RemoteMetricsPanel({ title, source, sourceTitle, cards, charts, footer, embedded = false }: RemoteMetricsPanelProps) {
   return (
-    <div className="overflow-hidden rounded-sm bg-white p-4 shadow-xs dark:bg-gray-800">
-      <div className="mb-4 flex items-center justify-between">
+    <div className={clsx('flex flex-col gap-4', !embedded && 'overflow-hidden rounded-sm bg-white p-4 shadow-xs dark:bg-gray-800')}>
+      <div className="flex items-center justify-between">
         <h3 className="flex items-center gap-2 text-sm/6 font-medium text-gray-900 dark:text-gray-100">
           <Zap className="size-4 text-gray-400 dark:text-gray-500" />
           {title}
@@ -106,12 +109,12 @@ export function RemoteMetricsPanel({ title, source, sourceTitle, cards, charts, 
       </div>
 
       {/* Summary Stats Row */}
-      <div className="mb-4 grid grid-cols-4 gap-2 sm:grid-cols-6">{cards}</div>
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">{cards}</div>
 
       {/* Charts Grid */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">{charts}</div>
 
-      <p className="mt-4 text-center text-xs/5 text-gray-500 dark:text-gray-400">{footer}</p>
+      <p className="text-center text-xs/5 text-gray-500 dark:text-gray-400">{footer}</p>
     </div>
   )
 }

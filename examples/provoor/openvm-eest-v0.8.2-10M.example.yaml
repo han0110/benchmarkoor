@@ -1,4 +1,4 @@
-# EEST v0.6.2 10M suite
+# EEST v0.8.2 10M suite
 global:
   log_level: info
 
@@ -49,11 +49,12 @@ runner:
       filter: gas-value_10M
       metadata:
         labels:
-          name: "zkVM stateless validation, eest v0.6.2, 10M gas"
+          name: "zkVM stateless validation, eest v0.8.2, 10M gas"
       source:
         eest_fixtures:
-          github_repo: han0110/execution-specs
-          github_release: tests-zkevm-benchmark@v0.6.2
+          github_repo: ethereum/execution-specs
+          github_release: tests-zkevm-benchmark@v0.8.2
+          fixtures_url: https://github.com/ethereum/execution-specs/releases/download/tests-zkevm-benchmark@v0.8.2/fixtures_zkevm-benchmark.tar.gz
           fixtures_subdir: fixtures/blockchain_tests
 
   instances:
@@ -67,8 +68,8 @@ runner:
       extra_args:
         - --zkvm=openvm
         - --stateless-validator=reth
-        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-reth-openvm-v2.1.0-preview.elf
-        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-reth-openvm-v2.1.0-preview.vk
+        - --elf=https://github.com/paradigmxyz/stateless/releases/download/reth-guest-v0.1.0-rc.2/stateless-validator-reth-openvm-v2.1.0-preview.elf
+        - --vk=https://github.com/paradigmxyz/stateless/releases/download/reth-guest-v0.1.0-rc.2/stateless-validator-reth-openvm-v2.1.0-preview.vk
         - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
     - id: ethrex-openvm
       client: provoor
@@ -80,20 +81,20 @@ runner:
       extra_args:
         - --zkvm=openvm
         - --stateless-validator=ethrex
-        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-ethrex-openvm-v2.1.0-preview.elf
-        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-ethrex-openvm-v2.1.0-preview.vk
+        - --elf=https://github.com/lambdaclass/ethrex/releases/download/v26.0.0-rc.2/stateless-validator-ethrex-openvm-v2.1.0-preview.elf
+        - --vk=https://github.com/lambdaclass/ethrex/releases/download/v26.0.0-rc.2/stateless-validator-ethrex-openvm-v2.1.0-preview.vk
         - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
-    - id: zesu-openvm
-      client: provoor
-      image: ghcr.io/han0110/provoor/provoor:latest
-      metadata:
-        labels:
-          zkvm: openvm
-          stateless_validator: zesu
-      extra_args:
-        - --zkvm=openvm
-        - --stateless-validator=zesu
-        - --elf=https://github.com/han0110/zesu-zkvm/releases/download/glamsterdam-devnet-7/stateless-validator-zesu-openvm-v2.1.0-preview.elf
-        - --vk=https://github.com/han0110/zesu-zkvm/releases/download/glamsterdam-devnet-7/stateless-validator-zesu-openvm-v2.1.0-preview.vk
-        - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
+    # - id: zesu-openvm
+    #   client: provoor
+    #   image: ghcr.io/han0110/provoor/provoor:latest
+    #   metadata:
+    #     labels:
+    #       zkvm: openvm
+    #       stateless_validator: zesu
+    #   extra_args:
+    #     - --zkvm=openvm
+    #     - --stateless-validator=zesu
+    #     - --elf=https://github.com/han0110/zesu-zkvm/releases/download/glamsterdam-devnet-7/stateless-validator-zesu-openvm-v2.1.0-preview.elf
+    #     - --vk=https://github.com/han0110/zesu-zkvm/releases/download/glamsterdam-devnet-7/stateless-validator-zesu-openvm-v2.1.0-preview.vk
+    #     - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
 

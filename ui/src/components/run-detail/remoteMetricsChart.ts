@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { TestEntry } from '@/api/types'
+import type { TraceSeries } from '@/utils/testMetrics'
 import { formatTestNameLong } from '@/utils/eestName'
 import { useNameDisplayMode } from '@/hooks/useNameDisplayMode'
 import { getAggregatedStats, ALL_STEP_TYPES } from '@/pages/RunDetailPage'
@@ -68,53 +69,25 @@ export const BUSIEST_COLOR = '#be185d'
 /** The floor of a percent axis. An idle pipe then reads as a flat line at zero rather than as noise scaled to fill the chart. */
 export const PERCENT_FLOOR = 1
 
-interface ChartOptionBuilderArgs<P extends ChartPoint> {
-  dataPoints: P[]
-  isDark: boolean
-  nameMode: ReturnType<typeof useNameDisplayMode>['mode']
-  zoomRange: { start: number; end: number }
-  /** One tooltip line naming how many devices the point rests on. Module scoped, so the options stay memoised. */
-  describe: (point: P) => string
+interface ZoomRange {
+  start: number
+  end: number
 }
 
-/**
- * useChartOptionBuilder returns the option factory the remote metric panels
- * share, and the ref that remembers the test under the pointer for a click to
- * open. Every chart plots one value per block on a shared zoom. Two or more
- * legend entries get a legend. A limit rides on a dashed series of its own,
- * named in the legend by its value, so hiding a data series never hides the
- * limit and no label crosses the data. A floor keeps a percent axis from
- * zooming into noise.
- */
-export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark, nameMode, zoomRange, describe }: ChartOptionBuilderArgs<P>) {
-  const highlightedTestRef = useRef<string | null>(null)
+/** chartFrame returns the theme and layout every remote metric chart shares. */
+function chartFrame(isDark: boolean, zoomRange: ZoomRange, zoomLabel: (value: number) => string) {
+  const textColor = isDark ? '#ffffff' : '#374151'
+  const mutedColor = isDark ? '#9ca3af' : '#6b7280'
+  const axisLineColor = isDark ? '#4b5563' : '#d1d5db'
+  const splitLineColor = isDark ? '#374151' : '#e5e7eb'
 
-  const makeOption = useMemo(() => {
-    const textColor = isDark ? '#ffffff' : '#374151'
-    const mutedColor = isDark ? '#9ca3af' : '#6b7280'
-    const axisLineColor = isDark ? '#4b5563' : '#d1d5db'
-    const splitLineColor = isDark ? '#374151' : '#e5e7eb'
-    const isLargeDataset = dataPoints.length > 100
-
-    const baseConfig = {
+  return {
+    textColor,
+    mutedColor,
+    base: {
       backgroundColor: 'transparent',
-      animation: !isLargeDataset,
       textStyle: { color: textColor },
       grid: { left: '3%', right: '4%', bottom: '50', top: '15%', containLabel: true },
-      xAxis: {
-        type: 'value' as const,
-        min: 1,
-        max: Math.max(dataPoints.length, 1),
-        minInterval: 1,
-        axisLabel: {
-          color: textColor,
-          fontSize: 11,
-          formatter: (value: number) => `#${value}`,
-        },
-        axisLine: { show: true, lineStyle: { color: axisLineColor } },
-        axisTick: { show: true, lineStyle: { color: axisLineColor } },
-        splitLine: { show: false },
-      },
       dataZoom: [
         {
           type: 'slider' as const,
@@ -135,10 +108,75 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
             areaStyle: { color: isDark ? 'rgba(34, 197, 94, 0.3)' : 'rgba(34, 197, 94, 0.2)' },
           },
           textStyle: { color: textColor, fontSize: 10 },
-          labelFormatter: (value: number) => `#${Math.round(value)}`,
+          labelFormatter: zoomLabel,
         },
         { type: 'inside' as const, xAxisIndex: 0, start: zoomRange.start, end: zoomRange.end },
       ],
+    },
+    legendStyle: {
+      top: 0,
+      right: 0,
+      textStyle: { color: textColor, fontSize: 10 },
+      itemWidth: 10,
+      itemHeight: 8,
+    },
+    tooltipStyle: {
+      trigger: 'axis' as const,
+      axisPointer: { type: 'line' as const },
+      backgroundColor: isDark ? '#1f2937' : '#ffffff',
+      borderColor: isDark ? '#374151' : '#e5e7eb',
+      textStyle: { color: textColor, fontSize: 12 },
+    },
+    xAxisStyle: (label: (value: number) => string) => ({
+      type: 'value' as const,
+      axisLabel: { color: textColor, fontSize: 11, formatter: label },
+      axisLine: { show: true, lineStyle: { color: axisLineColor } },
+      axisTick: { show: true, lineStyle: { color: axisLineColor } },
+      splitLine: { show: false },
+    }),
+    yAxisStyle: (format: (v: number) => string) => ({
+      type: 'value' as const,
+      axisLabel: { color: textColor, fontSize: 11, formatter: (v: number) => format(v) },
+      axisLine: { show: true, lineStyle: { color: axisLineColor } },
+      splitLine: { show: true, lineStyle: { color: splitLineColor, type: 'dashed' as const } },
+    }),
+  }
+}
+
+interface ChartOptionBuilderArgs<P extends ChartPoint> {
+  dataPoints: P[]
+  isDark: boolean
+  nameMode: ReturnType<typeof useNameDisplayMode>['mode']
+  zoomRange: ZoomRange
+  /** One tooltip line naming how many devices the point rests on. Module scoped, so the options stay memoised. */
+  describe: (point: P) => string
+}
+
+/**
+ * useChartOptionBuilder returns the option factory the remote metric panels
+ * share, and the ref that remembers the test under the pointer for a click to
+ * open. Every chart plots one value per block on a shared zoom. Two or more
+ * legend entries get a legend. A limit rides on a dashed series of its own,
+ * named in the legend by its value, so hiding a data series never hides the
+ * limit and no label crosses the data. A floor keeps a percent axis from
+ * zooming into noise.
+ */
+export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark, nameMode, zoomRange, describe }: ChartOptionBuilderArgs<P>) {
+  const highlightedTestRef = useRef<string | null>(null)
+
+  const makeOption = useMemo(() => {
+    const { mutedColor, base, legendStyle, tooltipStyle, xAxisStyle, yAxisStyle } = chartFrame(isDark, zoomRange, (value) => `#${Math.round(value)}`)
+    const isLargeDataset = dataPoints.length > 100
+
+    const baseConfig = {
+      ...base,
+      animation: !isLargeDataset,
+      xAxis: {
+        ...xAxisStyle((value) => `#${value}`),
+        min: 1,
+        max: Math.max(dataPoints.length, 1),
+        minInterval: 1,
+      },
     }
 
     return (series: Series<P>[], format: (v: number) => string, limit?: Reference, floor?: number) => {
@@ -152,23 +190,9 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
 
       return {
         ...baseConfig,
-        legend:
-          legendNames.length > 1
-            ? {
-                data: legendNames,
-                top: 0,
-                right: 0,
-                textStyle: { color: textColor, fontSize: 10 },
-                itemWidth: 10,
-                itemHeight: 8,
-              }
-            : undefined,
+        legend: legendNames.length > 1 ? { ...legendStyle, data: legendNames } : undefined,
         tooltip: {
-          trigger: 'axis' as const,
-          axisPointer: { type: 'line' as const },
-          backgroundColor: isDark ? '#1f2937' : '#ffffff',
-          borderColor: isDark ? '#374151' : '#e5e7eb',
-          textStyle: { color: textColor, fontSize: 12 },
+          ...tooltipStyle,
           formatter: (params: Array<{ dataIndex: number }>) => {
             const point = dataPoints[params[0]?.dataIndex]
             if (!point) return ''
@@ -183,7 +207,7 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
           },
         },
         yAxis: {
-          type: 'value' as const,
+          ...yAxisStyle(format),
           // A limit sets the top of the axis, so the room under it is the
           // headroom the rig had left. Without one the axis starts at zero.
           scale: reference !== undefined,
@@ -192,9 +216,6 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
             : floor !== undefined
               ? (extent: { max: number }) => (extent.max < floor ? floor : undefined)
               : undefined,
-          axisLabel: { color: textColor, fontSize: 11, formatter: (v: number) => format(v) },
-          axisLine: { show: true, lineStyle: { color: axisLineColor } },
-          splitLine: { show: true, lineStyle: { color: splitLineColor, type: 'dashed' as const } },
         },
         series: [
           ...series.map((s) => ({
@@ -234,4 +255,58 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
   }, [dataPoints, isDark, nameMode, zoomRange, describe])
 
   return { makeOption, highlightedTestRef }
+}
+
+/**
+ * useTraceOptionBuilder returns the option factory of the per test trace
+ * charts. Every chart plots one line per device over the seconds of the
+ * proving window on a shared zoom. The legend lists every device and scrolls
+ * once it holds more than eight, so any line can be toggled. The tooltip
+ * lists the devices that refreshed at the instant under the pointer.
+ */
+export function useTraceOptionBuilder({ isDark, zoomRange }: { isDark: boolean; zoomRange: ZoomRange }) {
+  return useMemo(() => {
+    const seconds = (value: number) => `${value.toFixed(1)} s`
+    const { textColor, mutedColor, base, legendStyle, tooltipStyle, xAxisStyle, yAxisStyle } = chartFrame(isDark, zoomRange, seconds)
+
+    return (series: TraceSeries[], format: (v: number) => string, floor?: number) => {
+      const show = (value: number | null) => (value === null ? 'n/a' : format(value))
+
+      return {
+        ...base,
+        legend: {
+          ...legendStyle,
+          type: series.length > 8 ? ('scroll' as const) : ('plain' as const),
+          pageIconColor: textColor,
+          pageIconInactiveColor: mutedColor,
+          pageTextStyle: { color: textColor, fontSize: 10 },
+          data: series.map((s) => s.name),
+        },
+        tooltip: {
+          ...tooltipStyle,
+          formatter: (params: Array<{ seriesName: string; marker: string; value: [number, number | null] }>) =>
+            params.length === 0
+              ? ''
+              : [
+                  `<strong>${seconds(params[0].value[0])}</strong>`,
+                  ...params.map((p) => `${p.marker}${p.seriesName}: <strong>${show(p.value[1])}</strong>`),
+                ].join('<br/>'),
+        },
+        xAxis: { ...xAxisStyle(seconds), min: 0, max: 'dataMax' as const },
+        yAxis: {
+          ...yAxisStyle(format),
+          max: floor === undefined ? undefined : (extent: { max: number }) => (extent.max < floor ? floor : undefined),
+        },
+        series: series.map((s) => ({
+          name: s.name,
+          type: 'line' as const,
+          smooth: false,
+          symbol: 'none',
+          data: s.data,
+          lineStyle: { width: 1.5, color: s.color },
+          itemStyle: { color: s.color },
+        })),
+      }
+    }
+  }, [isDark, zoomRange])
 }

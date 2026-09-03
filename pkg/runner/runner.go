@@ -634,6 +634,11 @@ func (r *runner) RunInstance(ctx context.Context, instance *config.ClientInstanc
 
 		scraper := remotemetrics.NewScraper(endpoints, rmCfg.GetInterval(), rmCfg.GetTimeout())
 		remoteMetrics = remotemetrics.NewCollector(scraper)
+		remoteMetrics.TestWriter = func(testFile string, data []byte) {
+			if err := executor.WriteTestFile(runResultsDir, testFile, remotemetrics.TestArtifactName, data, r.cfg.ResultsOwner); err != nil {
+				r.logger.WithError(err).WithField("test", testFile).Warn("Failed to write per test remote metrics")
+			}
+		}
 
 		scrapeCtx, stopScraping := context.WithCancel(ctx)
 		go scraper.Run(scrapeCtx)

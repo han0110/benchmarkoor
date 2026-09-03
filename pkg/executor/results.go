@@ -625,6 +625,23 @@ func percentileFloat(sorted []float64, p int) float64 {
 	return sorted[idx]
 }
 
+// WriteTestFile writes one extra file into the result directory of a test,
+// beside its step results. The directory is created when the file arrives
+// before the first step result, and the test name marker is left to
+// WriteStepResults.
+func WriteTestFile(
+	resultDir, testName, fileName string,
+	data []byte,
+	owner *fsutil.OwnerConfig,
+) error {
+	testDir := filepath.Join(resultDir, sanitizeResultPath(testName))
+	if err := fsutil.MkdirAll(testDir, 0755, owner); err != nil {
+		return fmt.Errorf("creating test result directory: %w", err)
+	}
+
+	return fsutil.WriteFile(filepath.Join(testDir, fileName), data, 0644, owner)
+}
+
 // WriteStepResults writes the three output files for a test step.
 // Files are written to: resultDir/testName/{stepType}.{response,result-details.json,result-aggregated.json}
 func WriteStepResults(

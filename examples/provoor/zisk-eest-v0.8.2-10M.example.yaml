@@ -1,4 +1,4 @@
-# EEST v0.6.2 30M/60M/100M suite
+# EEST v0.8.2 10M suite
 global:
   log_level: info
 
@@ -46,54 +46,55 @@ runner:
     results_dir: ./results
     system_resource_collection_enabled: false
     tests:
-      filter: 'regex:gas-value_(30|60|100)M\]'
+      filter: gas-value_10M
       metadata:
         labels:
-          name: "zkVM stateless validation, eest v0.6.2, 30M/60M/100M gas"
+          name: "zkVM stateless validation, eest v0.8.2, 10M gas"
       source:
         eest_fixtures:
-          github_repo: han0110/execution-specs
-          github_release: tests-zkevm-benchmark@v0.6.2
+          github_repo: ethereum/execution-specs
+          github_release: tests-zkevm-benchmark@v0.8.2
+          fixtures_url: https://github.com/ethereum/execution-specs/releases/download/tests-zkevm-benchmark@v0.8.2/fixtures_zkevm-benchmark.tar.gz
           fixtures_subdir: fixtures/blockchain_tests
 
   instances:
-    - id: reth-openvm
+    - id: reth-zisk
       client: provoor
       image: ghcr.io/han0110/provoor/provoor:latest
       metadata:
         labels:
-          zkvm: openvm
+          zkvm: zisk
           stateless_validator: reth
       extra_args:
-        - --zkvm=openvm
+        - --zkvm=zisk
         - --stateless-validator=reth
-        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-reth-openvm-v2.1.0-preview.elf
-        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-reth-openvm-v2.1.0-preview.vk
-        - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
-    - id: ethrex-openvm
+        - --elf=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-zisk-v1.2.0-alpha.elf
+        - --vk=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-zisk-v1.2.0-alpha.vk
+        - --coordinator-endpoint=http://${COORDINATOR_IP}:7000
+    - id: ethrex-zisk
       client: provoor
       image: ghcr.io/han0110/provoor/provoor:latest
       metadata:
         labels:
-          zkvm: openvm
+          zkvm: zisk
           stateless_validator: ethrex
       extra_args:
-        - --zkvm=openvm
+        - --zkvm=zisk
         - --stateless-validator=ethrex
-        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-ethrex-openvm-v2.1.0-preview.elf
-        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.16.0/stateless-validator-ethrex-openvm-v2.1.0-preview.vk
-        - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
-    - id: zesu-openvm
-      client: provoor
-      image: ghcr.io/han0110/provoor/provoor:latest
-      metadata:
-        labels:
-          zkvm: openvm
-          stateless_validator: zesu
-      extra_args:
-        - --zkvm=openvm
-        - --stateless-validator=zesu
-        - --elf=https://github.com/han0110/zesu-zkvm/releases/download/glamsterdam-devnet-7/stateless-validator-zesu-openvm-v2.1.0-preview.elf
-        - --vk=https://github.com/han0110/zesu-zkvm/releases/download/glamsterdam-devnet-7/stateless-validator-zesu-openvm-v2.1.0-preview.vk
-        - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
+        - --elf=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-ethrex-zisk-v1.2.0-alpha.elf
+        - --vk=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-ethrex-zisk-v1.2.0-alpha.vk
+        - --coordinator-endpoint=http://${COORDINATOR_IP}:7000
+    # - id: zesu-zisk
+    #   client: provoor
+    #   image: ghcr.io/han0110/provoor/provoor:latest
+    #   metadata:
+    #     labels:
+    #       zkvm: zisk
+    #       stateless_validator: zesu
+    #   extra_args:
+    #     - --zkvm=zisk
+    #     - --stateless-validator=zesu
+    #     - --elf=https://github.com/han0110/ere-guests/releases/download/v0.16.0/stateless-validator-zesu-zisk-v1.1.0-alpha.elf
+    #     - --vk=https://github.com/han0110/ere-guests/releases/download/v0.16.0/stateless-validator-zesu-zisk-v1.1.0-alpha.vk
+    #     - --coordinator-endpoint=http://${COORDINATOR_IP}:7000
 

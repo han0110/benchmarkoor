@@ -102,7 +102,7 @@ export function GpuMetricsCharts({ metrics, suiteTests, searchQuery, tests, stat
           <StatCard label="Min Temp Margin" value={`${figure(summary.minTempMargin, 0)} °C`} />
           {hasDuration && <StatCard label="Throttled Time, All GPUs" value={`${figure(summary.throttledShare, 1)}%`} />}
           <StatCard label="PCIe Replays" value={figure(summary.pcieReplays, 0)} />
-          <StatCard label="DCGM Refresh" value={`${summary.meanRefreshRatio.toFixed(0)}%`} />
+          <StatCard label="DCGM Refresh" value={`${figure(summary.meanRefreshRatio, 0)}%`} />
         </>
       }
       charts={

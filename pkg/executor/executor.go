@@ -95,9 +95,12 @@ type BlockLogCollector interface {
 }
 
 // BlockWindowRecorder receives the instants one block payload occupied, so a
-// remote metrics collector can reduce its samples over the same window.
+// remote metrics collector can reduce its samples over the same window. A
+// call that failed without a retry is recorded as an attempt, since its window
+// still shows what the cluster did even though no block was proved in it.
 type BlockWindowRecorder interface {
 	RecordBlock(testName, blockHash string, start, end time.Time)
+	RecordAttempt(testName, blockHash string, start, end time.Time)
 }
 
 // ExecuteOptions contains options for test execution.
@@ -982,8 +985,8 @@ func (e *executor) runStepLines(
 		succeeded := err == nil
 
 		// The instant the timed call returned, held until the outcome is
-		// final. The window is reported only for a block that proved, so a
-		// timeout or a rejection never contributes a window of idle time.
+		// final. The window is reported only when no retry follows, so a
+		// retried block never contributes a window of idle time.
 		blockEnd := time.Now()
 
 		e.log.WithFields(logrus.Fields{
@@ -1045,8 +1048,9 @@ func (e *executor) runStepLines(
 		// JSON-RPC error) takes the failed-state retry config when enabled.
 		// Non-newPayload methods are not retried.
 		// A retry proves the block again, so the timed window no longer
-		// describes the work that succeeded.
+		// describes the work that succeeded, nor the attempt that failed.
 		provedOnTheTimedCall := succeeded
+		retried := false
 
 		if !succeeded && jsonrpc.IsBlockPayloadMethod(method) {
 			isSyncing := validationErr != nil && jsonrpc.IsSyncingError(validationErr)
@@ -1054,6 +1058,7 @@ func (e *executor) runStepLines(
 			switch {
 			case isSyncing && opts.RetryNewPayloadsSyncingConfig != nil &&
 				opts.RetryNewPayloadsSyncingConfig.Enabled:
+				retried = true
 				retrySucceeded, retryResponse, retryDuration := e.retryNewPayloadSyncing(
 					ctx, opts, line, method, stepName, lineNum,
 				)
@@ -1064,6 +1069,7 @@ func (e *executor) runStepLines(
 				}
 			case opts.RetryNewPayloadsFailedConfig != nil &&
 				opts.RetryNewPayloadsFailedConfig.Enabled:
+				retried = true
 				retrySucceeded, retryResponse, retryDuration := e.retryNewPayloadFailed(
 					ctx, opts, line, method, stepName, lineNum,
 				)
@@ -1090,11 +1096,15 @@ func (e *executor) runStepLines(
 			}).WithError(validationErr).Warn("Response validation failed")
 		}
 
-		if provedOnTheTimedCall && opts.BlockWindowRecorder != nil &&
+		if !retried && opts.BlockWindowRecorder != nil &&
 			jsonrpc.IsBlockPayloadMethod(method) && result != nil {
 			if blockHash, hashErr := extractBlockHash(line); hashErr == nil {
-				opts.BlockWindowRecorder.RecordBlock(result.TestFile, blockHash,
-					blockEnd.Add(-time.Duration(fullDuration)), blockEnd)
+				blockStart := blockEnd.Add(-time.Duration(fullDuration))
+				if provedOnTheTimedCall {
+					opts.BlockWindowRecorder.RecordBlock(result.TestFile, blockHash, blockStart, blockEnd)
+				} else {
+					opts.BlockWindowRecorder.RecordAttempt(result.TestFile, blockHash, blockStart, blockEnd)
+				}
 			}
 		}
 
