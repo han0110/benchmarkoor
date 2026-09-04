@@ -128,14 +128,12 @@ describe('reduceGpuMetrics', () => {
     expect(point.tempMargin).toBeCloseTo(10)
     expect(point.fbUsedGiB).toBeCloseTo(30)
     expect(point.fbTotalGiB).toBeCloseTo(32)
-    expect(point.refreshRatio).toBeCloseTo(100)
   })
 
   it('summarises the run over every block', () => {
     const { summary, hasPower, hasPcieRate, hasDuration } = reduceGpuMetrics(metrics)
 
     expect(hasPower && hasPcieRate && hasDuration).toBe(true)
-    expect(summary.devices).toBe(2)
     expect(summary.blocks).toBe(2)
     expect(summary.meanSmActive).toBeCloseTo(60)
     expect(summary.peakSmActive).toBeCloseTo(80)
@@ -149,7 +147,6 @@ describe('reduceGpuMetrics', () => {
     // Half a second throttled out of three GPU seconds.
     expect(summary.throttledShare).toBeCloseTo(100 / 6)
     expect(summary.pcieReplays).toBe(0)
-    expect(summary.meanRefreshRatio).toBeCloseTo(100)
   })
 
   it('orders blocks as the suite ran them', () => {
@@ -228,27 +225,12 @@ describe('reduceGpuMetrics', () => {
     expect(summary.meanSmActive).toBeCloseTo(80)
   })
 
-  it('reports the slowest refreshing GPU', () => {
-    const stale = withCells(busy, { device: 1, updates: 0 })
-    const { dataPoints } = reduceGpuMetrics({ ...metrics, tests: { 'b.json': { '0x1': [busy, stale] } } })
+  it('weighs a block by the time it took', () => {
+    const long = withCells(busy, { duration_ms: 3000 })
+    const { summary } = reduceGpuMetrics({ ...metrics, tests: { 'a.json': { '0x2': [long] }, 'b.json': { '0x1': [busy, idle] } } })
 
-    expect(dataPoints[0].refreshRatio).toBe(0)
-  })
-
-  it('leaves an idle GPU out of the refresh ratio', () => {
-    const stale = withCells(idle, { updates: 0 })
-    const { dataPoints, summary } = reduceGpuMetrics({ ...metrics, tests: { 'b.json': { '0x1': [busy, stale] } } })
-
-    expect(dataPoints[0].refreshRatio).toBeCloseTo(100)
-    expect(summary.meanRefreshRatio).toBeCloseTo(100)
-  })
-
-  it('leaves the refresh ratio unmeasured when no GPU of the block did work', () => {
-    const stale = withCells(idle, { updates: 0 })
-    const { dataPoints, summary } = reduceGpuMetrics({ ...metrics, tests: { 'a.json': { '0x2': [busy] }, 'b.json': { '0x1': [stale] } } })
-
-    expect(dataPoints.find((p) => p.testName === 'b.json')!.refreshRatio).toBeNull()
-    expect(summary.meanRefreshRatio).toBeCloseTo(100)
+    expect(summary.meanSmActive).toBeCloseTo(70)
+    expect(summary.meanWatts).toBeCloseTo(352.5)
   })
 
   it('bounds the throttled share when power and heat overlap', () => {

@@ -77,6 +77,86 @@ func TestCollector_MultipleTests(t *testing.T) {
 	assert.Contains(t, string(logs["test-2"]), `"test":2`)
 }
 
+func TestCollector_SharedHashMatchesInRegistrationOrder(t *testing.T) {
+	downstream := &bytes.Buffer{}
+	parser := NewGethParser()
+	collector := NewCollector(parser, downstream)
+	writer := collector.Writer()
+
+	// Two tests hold the same block, and both register before either log arrives.
+	collector.RegisterBlockHash("test-1", "0xshared")
+	collector.RegisterBlockHash("test-2", "0xshared")
+
+	_, err := writer.Write([]byte(`WARN [02-02|15:03:22.121] {"version":1,"block":{"hash":"0xshared"}}` + "\n"))
+	require.NoError(t, err)
+
+	_, err = writer.Write([]byte(`WARN [02-02|15:03:22.122] {"version":2,"block":{"hash":"0xshared"}}` + "\n"))
+	require.NoError(t, err)
+
+	logs := collector.GetBlockLogs()
+	require.Len(t, logs, 2)
+	assert.Contains(t, string(logs["test-1"]), `"version":1`)
+	assert.Contains(t, string(logs["test-2"]), `"version":2`)
+}
+
+func TestCollector_ReleaseFreesSharedHash(t *testing.T) {
+	downstream := &bytes.Buffer{}
+	parser := NewGethParser()
+	collector := NewCollector(parser, downstream)
+	writer := collector.Writer()
+
+	// Three tests hold the same block, and the second one fails its call and
+	// prints no log, so it releases the hash.
+	collector.RegisterBlockHash("test-1", "0xshared")
+	collector.RegisterBlockHash("test-2", "0xshared")
+	collector.RegisterBlockHash("test-3", "0xshared")
+	collector.ReleaseBlockHash("test-2", "0xshared")
+
+	// Releasing a test that no longer waits leaves the queue alone.
+	collector.ReleaseBlockHash("test-2", "0xshared")
+
+	_, err := writer.Write([]byte(`WARN [02-02|15:03:22.121] {"version":1,"block":{"hash":"0xshared"}}` + "\n"))
+	require.NoError(t, err)
+
+	_, err = writer.Write([]byte(`WARN [02-02|15:03:22.122] {"version":2,"block":{"hash":"0xshared"}}` + "\n"))
+	require.NoError(t, err)
+
+	// Nothing waits any more, so a third log matches no test.
+	_, err = writer.Write([]byte(`WARN [02-02|15:03:22.123] {"version":3,"block":{"hash":"0xshared"}}` + "\n"))
+	require.NoError(t, err)
+
+	logs := collector.GetBlockLogs()
+	require.Len(t, logs, 2)
+	assert.Contains(t, string(logs["test-1"]), `"version":1`)
+	assert.Contains(t, string(logs["test-3"]), `"version":2`)
+	assert.NotContains(t, logs, "test-2")
+}
+
+func TestCollector_BufferedLogsMatchInArrivalOrder(t *testing.T) {
+	downstream := &bytes.Buffer{}
+	parser := NewGethParser()
+	collector := NewCollector(parser, downstream)
+	writer := collector.Writer()
+
+	// Both logs arrive before either test registers.
+	_, err := writer.Write([]byte(`WARN [02-02|15:03:22.121] {"version":1,"block":{"hash":"0xshared"}}` + "\n"))
+	require.NoError(t, err)
+
+	_, err = writer.Write([]byte(`WARN [02-02|15:03:22.122] {"version":2,"block":{"hash":"0xshared"}}` + "\n"))
+	require.NoError(t, err)
+
+	logs := collector.GetBlockLogs()
+	assert.Empty(t, logs)
+
+	collector.RegisterBlockHash("test-1", "0xshared")
+	collector.RegisterBlockHash("test-2", "0xshared")
+
+	logs = collector.GetBlockLogs()
+	require.Len(t, logs, 2)
+	assert.Contains(t, string(logs["test-1"]), `"version":1`)
+	assert.Contains(t, string(logs["test-2"]), `"version":2`)
+}
+
 func TestCollector_NoRegistration(t *testing.T) {
 	downstream := &bytes.Buffer{}
 	parser := NewGethParser()

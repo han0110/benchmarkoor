@@ -141,6 +141,42 @@ func TestScrapeLearnsKindsFromTheExposition(t *testing.T) {
 	}
 }
 
+// TestDeviceIDsDropAnUnlistedGPU covers a node that proves with a subset of
+// its GPUs. An idle GPU stored beside the working ones pulls every mean down
+// and counts as one more busy device.
+func TestDeviceIDsDropAnUnlistedGPU(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = w.Write([]byte(
+			"# TYPE DCGM_FI_PROF_DRAM_ACTIVE gauge\n" +
+				"DCGM_FI_PROF_DRAM_ACTIVE{gpu=\"0\",UUID=\"GPU-aaa\"} 0.75\n" +
+				"DCGM_FI_PROF_DRAM_ACTIVE{gpu=\"1\",UUID=\"GPU-bbb\"} 0.65\n" +
+				"DCGM_FI_PROF_DRAM_ACTIVE{gpu=\"2\",UUID=\"GPU-ccc\"} 0\n"))
+	}))
+	defer server.Close()
+
+	scraper := NewScraper([]Endpoint{{
+		Exporter:  ExporterDCGM,
+		URL:       server.URL,
+		Labels:    map[string]string{"node": "node0"},
+		DeviceIDs: []int{0, 1},
+	}}, time.Second, time.Second)
+
+	require.NoError(t, scraper.scrape(context.Background(), scraper.endpoints[0]))
+
+	require.Len(t, scraper.devices, 2, "the unlisted gpu reached the device list")
+
+	for device, labels := range scraper.devices {
+		assert.NotEqual(t, "2", labels["gpu"], "device %s is the unlisted gpu", device)
+	}
+
+	require.Len(t, scraper.points, 2, "the unlisted gpu reached the readings")
+
+	for key := range scraper.points {
+		assert.NotContains(t, key.device, "gpu=2")
+	}
+}
+
 // TestReduceProducesOneRowPerDevice covers the whole path from an exposition
 // to the reduced window a run stores.
 func TestReduceProducesOneRowPerDevice(t *testing.T) {
@@ -463,11 +499,24 @@ func TestRowWritesOnlyTheListedStatistics(t *testing.T) {
 // listed counter as a gauge. Its total would otherwise be written as a zero,
 // which reads as a device that did no work.
 func TestStatisticRefusesTheOtherKind(t *testing.T) {
-	_, _, ok := statistic(Stat{Total: 5}, KindGauge, "total")
+	_, _, ok := statistic(Stat{Total: 5}, KindGauge, "DCGM_FI_DEV_PCIE_REPLAY_COUNTER", "total")
 	assert.False(t, ok)
 
-	_, _, ok = statistic(Stat{Mean: 5}, KindCounter, "mean")
+	_, _, ok = statistic(Stat{Mean: 5}, KindCounter, "DCGM_FI_DEV_POWER_USAGE", "mean")
 	assert.False(t, ok)
+}
+
+// TestSecondsCounterKeepsItsDecimals covers the processor counters, whose
+// totals are seconds. Rounded whole, a node that worked four tenths of a
+// second over a block reads as one that did nothing.
+func TestSecondsCounterKeepsItsDecimals(t *testing.T) {
+	value, scale, ok := statistic(Stat{Total: 0.4}, KindCounter, "node_cpu_busy_seconds_total", "total")
+	require.True(t, ok)
+	assert.EqualValues(t, 4000, *quantise(value, scale))
+
+	value, scale, ok = statistic(Stat{Total: 3}, KindCounter, "DCGM_FI_DEV_PCIE_REPLAY_COUNTER", "total")
+	require.True(t, ok)
+	assert.EqualValues(t, 3, *quantise(value, scale), "a count of events stays whole")
 }
 
 // TestScrapeDropsAMetricOutsideTheArtifact keeps the buffer as small as the
@@ -786,7 +835,22 @@ func TestPeakRateFollowsTheSourceNotTheScraper(t *testing.T) {
 		return series
 	}
 
-	assert.InDelta(t, 1000, peakRate(slow(900, 3000)), 0.001, "three refreshes")
-	assert.InDelta(t, 1000.0/1.5, peakRate(slow(0, 1500)), 0.001, "one refresh falls back to the bracket mean")
-	assert.Zero(t, peakRate(slow(1000, 1900)), "no refresh is no advance")
+	assert.InDelta(t, 1000, peakRate(slow(900, 3000), 100*time.Millisecond), 0.001, "three refreshes")
+	assert.InDelta(t, 1000.0/1.5, peakRate(slow(0, 1500), 100*time.Millisecond), 0.001, "one refresh falls back to the bracket mean")
+	assert.Zero(t, peakRate(slow(1000, 1900), 100*time.Millisecond), "no refresh is no advance")
+}
+
+// TestPeakRateHoldsTheDivisorAtOnePoll replays a scrape that overran its tick
+// and left the next one two milliseconds behind it. Every refresh advances the
+// counter by the same amount, so the peak is the rate of the source rather
+// than the rate that catch-up pair implies.
+func TestPeakRateHoldsTheDivisorAtOnePoll(t *testing.T) {
+	var series []point
+	value := 0.0
+	for _, offset := range []int{274, 374, 474, 687, 689, 775} {
+		series = append(series, point{at: at(offset), value: value})
+		value += 2.3e8
+	}
+
+	assert.InDelta(t, 2.3e9, peakRate(series, 100*time.Millisecond), 1, "the advance of one refresh over one poll")
 }

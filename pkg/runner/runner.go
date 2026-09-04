@@ -626,9 +626,10 @@ func (r *runner) RunInstance(ctx context.Context, instance *config.ClientInstanc
 
 		for _, endpoint := range rmCfg.Endpoints {
 			endpoints = append(endpoints, remotemetrics.Endpoint{
-				Exporter: endpoint.Kind,
-				URL:      endpoint.URL,
-				Labels:   endpoint.Labels,
+				Exporter:  endpoint.Kind,
+				URL:       endpoint.URL,
+				Labels:    endpoint.Labels,
+				DeviceIDs: endpoint.DeviceIDs,
 			})
 		}
 

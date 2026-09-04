@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { TestEntry } from '@/api/types'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { DeviceMetrics, SuiteTest, TestEntry } from '@/api/types'
 import type { TraceSeries } from '@/utils/testMetrics'
 import { formatTestNameLong } from '@/utils/eestName'
 import { useNameDisplayMode } from '@/hooks/useNameDisplayMode'
@@ -61,6 +61,31 @@ export interface Series<P> {
 export interface Reference {
   value: number
   label: string
+  /** Keeps zero on the axis, for a limit that is the whole scale of the chart. */
+  wholeScale?: boolean
+}
+
+/** The artifact and the page filters one remote metric section reads. */
+export interface RemoteMetricsSectionProps {
+  metrics?: DeviceMetrics | null
+  /** Suite tests in canonical run order, so Test # matches the other charts. */
+  suiteTests?: SuiteTest[]
+  /** Only tests whose name matches this query are charted. */
+  searchQuery?: string
+  /** Test results, which carry the pass or fail state the status filter reads. */
+  tests?: Record<string, TestEntry>
+  statusFilter?: TestStatusFilter
+  onTestClick?: (testName: string) => void
+  /** The zoom the panel owns, so one drag moves every chart of it. */
+  zoomRange: ZoomRange
+  onZoom: (start: number, end: number) => void
+}
+
+/** The parts of one exporter, which the panel lays out beside those of the others. */
+export interface RemoteMetricsSection {
+  source: { name: string; title: string }
+  cards: ReactNode
+  charts: ReactNode
 }
 
 /** The one hue of every busiest series, so the eye learns it once across the panels. */
@@ -75,7 +100,7 @@ interface ZoomRange {
 }
 
 /** chartFrame returns the theme and layout every remote metric chart shares. */
-function chartFrame(isDark: boolean, zoomRange: ZoomRange, zoomLabel: (value: number) => string) {
+export function chartFrame(isDark: boolean, zoomRange: ZoomRange, zoomLabel: (value: number) => string) {
   const textColor = isDark ? '#ffffff' : '#374151'
   const mutedColor = isDark ? '#9ca3af' : '#6b7280'
   const axisLineColor = isDark ? '#4b5563' : '#d1d5db'
@@ -143,6 +168,49 @@ function chartFrame(isDark: boolean, zoomRange: ZoomRange, zoomLabel: (value: nu
   }
 }
 
+/**
+ * referenceLine renders a limit as a dashed series of its own, named by its
+ * value. ECharts places a marker line at its value rounded to two decimals and
+ * drops it when that lands above the axis top, so the value is rounded the
+ * same way first and the axis top and the marker share it.
+ */
+function referenceLine(limit: Reference, format: (v: number) => string, color: string) {
+  const value = Number(limit.value.toFixed(2))
+  const name = `${format(value)} ${limit.label}`
+  const dashed = { type: 'dashed' as const, color, width: 1 }
+
+  return {
+    name,
+    // A limit sets the top of the axis, so the room under it is the headroom
+    // the rig had left. A limit that is the whole scale keeps zero on the axis.
+    axis: {
+      scale: !limit.wholeScale,
+      max: (extent: { max: number }) => (Number.isFinite(extent.max) ? Math.max(extent.max, value) : value),
+    },
+    series: {
+      name,
+      type: 'line' as const,
+      data: [] as Array<[number, number]>,
+      silent: true,
+      symbol: 'none',
+      lineStyle: dashed,
+      itemStyle: { color },
+      markLine: {
+        silent: true,
+        symbol: 'none',
+        lineStyle: dashed,
+        label: { show: false },
+        data: [{ yAxis: value }],
+      },
+    },
+  }
+}
+
+/** A percent axis floor, which keeps an idle chart from zooming into noise. */
+const floorMax = (floor?: number) => ({
+  max: floor === undefined ? undefined : (extent: { max: number }) => (extent.max < floor ? floor : undefined),
+})
+
 interface ChartOptionBuilderArgs<P extends ChartPoint> {
   dataPoints: P[]
   isDark: boolean
@@ -165,14 +233,23 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
   const highlightedTestRef = useRef<string | null>(null)
 
   const makeOption = useMemo(() => {
-    const { mutedColor, base, legendStyle, tooltipStyle, xAxisStyle, yAxisStyle } = chartFrame(isDark, zoomRange, (value) => `#${Math.round(value)}`)
+    // The axis plots the dense index of the charted points, so the label
+    // reads the test number the tooltip and the tests table name. Only an
+    // integer position names a test. A zoom slider handle rests on a
+    // fractional position, so it names the nearest test.
+    const testLabel = (position: number) => {
+      const point = Number.isInteger(position) ? dataPoints[position - 1] : undefined
+
+      return point ? `#${point.testNumber}` : ''
+    }
+    const { mutedColor, base, legendStyle, tooltipStyle, xAxisStyle, yAxisStyle } = chartFrame(isDark, zoomRange, (value) => testLabel(Math.round(value)))
     const isLargeDataset = dataPoints.length > 100
 
     const baseConfig = {
       ...base,
       animation: !isLargeDataset,
       xAxis: {
-        ...xAxisStyle((value) => `#${value}`),
+        ...xAxisStyle(testLabel),
         min: 1,
         max: Math.max(dataPoints.length, 1),
         minInterval: 1,
@@ -181,12 +258,8 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
 
     return (series: Series<P>[], format: (v: number) => string, limit?: Reference, floor?: number) => {
       const show = (value: number | null) => (value === null ? 'n/a' : format(value))
-      // ECharts places a marker line at its value rounded to two decimals and
-      // drops it when that lands above the axis top. The limit is rounded the
-      // same way first, so the axis top and the marker share one value.
-      const reference = limit === undefined ? undefined : { ...limit, value: Number(limit.value.toFixed(2)) }
-      const referenceName = reference === undefined ? undefined : `${format(reference.value)} ${reference.label}`
-      const legendNames = [...series.map((s) => s.name), ...(referenceName === undefined ? [] : [referenceName])]
+      const reference = limit === undefined ? undefined : referenceLine(limit, format, mutedColor)
+      const legendNames = [...series.map((s) => s.name), ...(reference === undefined ? [] : [reference.name])]
 
       return {
         ...baseConfig,
@@ -208,14 +281,7 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
         },
         yAxis: {
           ...yAxisStyle(format),
-          // A limit sets the top of the axis, so the room under it is the
-          // headroom the rig had left. Without one the axis starts at zero.
-          scale: reference !== undefined,
-          max: reference
-            ? (extent: { max: number }) => (Number.isFinite(extent.max) ? Math.max(extent.max, reference.value) : reference.value)
-            : floor !== undefined
-              ? (extent: { max: number }) => (extent.max < floor ? floor : undefined)
-              : undefined,
+          ...(reference === undefined ? floorMax(floor) : reference.axis),
         },
         series: [
           ...series.map((s) => ({
@@ -229,26 +295,7 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
             lineStyle: { width: 1.5, color: s.color },
             itemStyle: { color: s.color },
           })),
-          ...(reference
-            ? [
-                {
-                  name: referenceName,
-                  type: 'line' as const,
-                  data: [] as Array<[number, number]>,
-                  silent: true,
-                  symbol: 'none',
-                  lineStyle: { type: 'dashed' as const, color: mutedColor, width: 1 },
-                  itemStyle: { color: mutedColor },
-                  markLine: {
-                    silent: true,
-                    symbol: 'none',
-                    lineStyle: { type: 'dashed' as const, color: mutedColor, width: 1 },
-                    label: { show: false },
-                    data: [{ yAxis: reference.value }],
-                  },
-                },
-              ]
-            : []),
+          ...(reference === undefined ? [] : [reference.series]),
         ],
       }
     }
@@ -262,15 +309,18 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
  * charts. Every chart plots one line per device over the seconds of the
  * proving window on a shared zoom. The legend lists every device and scrolls
  * once it holds more than eight, so any line can be toggled. The tooltip
- * lists the devices that refreshed at the instant under the pointer.
+ * lists the devices that refreshed at the instant under the pointer. A limit
+ * rides on a dashed line of its own, as it does on the run charts.
  */
 export function useTraceOptionBuilder({ isDark, zoomRange }: { isDark: boolean; zoomRange: ZoomRange }) {
   return useMemo(() => {
     const seconds = (value: number) => `${value.toFixed(1)} s`
     const { textColor, mutedColor, base, legendStyle, tooltipStyle, xAxisStyle, yAxisStyle } = chartFrame(isDark, zoomRange, seconds)
 
-    return (series: TraceSeries[], format: (v: number) => string, floor?: number) => {
+    return (series: TraceSeries[], format: (v: number) => string, floor?: number, limit?: Reference) => {
       const show = (value: number | null) => (value === null ? 'n/a' : format(value))
+      const isLargeDataset = series.reduce((total, s) => total + s.data.length, 0) > 100
+      const reference = limit === undefined ? undefined : referenceLine(limit, format, mutedColor)
 
       return {
         ...base,
@@ -280,7 +330,7 @@ export function useTraceOptionBuilder({ isDark, zoomRange }: { isDark: boolean; 
           pageIconColor: textColor,
           pageIconInactiveColor: mutedColor,
           pageTextStyle: { color: textColor, fontSize: 10 },
-          data: series.map((s) => s.name),
+          data: [...series.map((s) => s.name), ...(reference === undefined ? [] : [reference.name])],
         },
         tooltip: {
           ...tooltipStyle,
@@ -295,17 +345,21 @@ export function useTraceOptionBuilder({ isDark, zoomRange }: { isDark: boolean; 
         xAxis: { ...xAxisStyle(seconds), min: 0, max: 'dataMax' as const },
         yAxis: {
           ...yAxisStyle(format),
-          max: floor === undefined ? undefined : (extent: { max: number }) => (extent.max < floor ? floor : undefined),
+          ...(reference === undefined ? floorMax(floor) : reference.axis),
         },
-        series: series.map((s) => ({
-          name: s.name,
-          type: 'line' as const,
-          smooth: false,
-          symbol: 'none',
-          data: s.data,
-          lineStyle: { width: 1.5, color: s.color },
-          itemStyle: { color: s.color },
-        })),
+        series: [
+          ...series.map((s) => ({
+            name: s.name,
+            type: 'line' as const,
+            smooth: false,
+            symbol: isLargeDataset ? 'none' : 'circle',
+            symbolSize: 4,
+            data: s.data,
+            lineStyle: { width: 1.5, color: s.color },
+            itemStyle: { color: s.color },
+          })),
+          ...(reference === undefined ? [] : [reference.series]),
+        ],
       }
     }
   }, [isDark, zoomRange])

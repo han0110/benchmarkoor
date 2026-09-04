@@ -102,7 +102,7 @@ func reduce(points []point, kind Kind, start, end time.Time, interval time.Durat
 			return Stat{}, 0, 0, false
 		}
 		count, changes := activity(bracket, start, end)
-		return Stat{Total: total, PeakRate: peakRate(bracket)}, count, changes, true
+		return Stat{Total: total, PeakRate: peakRate(bracket, interval)}, count, changes, true
 	}
 	stat, count, ok := gaugeStat(bracket, start, end)
 	if !ok {
@@ -201,8 +201,9 @@ func counterTotal(points []point, start, end time.Time) (float64, bool) {
 // refresh before it lies outside the bracket. With one change the mean rate
 // over the bracket stands in. A counter idle for several refreshes and then
 // bursting reports the burst spread over the idle span, which is the
-// accepted cost.
-func peakRate(points []point) float64 {
+// accepted cost. Two readings closer than one poll cannot resolve the span
+// between two refreshes, so the divisor holds at the poll interval.
+func peakRate(points []point, interval time.Duration) float64 {
 	var peak float64
 	var refresh *point
 	var changes int
@@ -216,7 +217,7 @@ func peakRate(points []point) float64 {
 
 		if refresh != nil {
 			if span := points[i].at.Sub(refresh.at).Seconds(); span > 0 {
-				peak = math.Max(peak, (points[i].value-refresh.value)/span)
+				peak = math.Max(peak, (points[i].value-refresh.value)/math.Max(span, interval.Seconds()))
 			}
 		}
 

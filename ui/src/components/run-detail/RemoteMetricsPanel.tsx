@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, type ReactNode } from 'react'
 import clsx from 'clsx'
 import ReactECharts from 'echarts-for-react'
-import { Zap } from 'lucide-react'
+import { Cpu } from 'lucide-react'
 
 interface StatCardProps {
   label: string
@@ -81,10 +81,10 @@ export function ChartSection({ title, option, onZoom, onPointClick, highlightedT
 }
 
 interface RemoteMetricsPanelProps {
-  title: string
-  /** The exporter the rows came from, shown in the header. */
-  source: string
-  sourceTitle: string
+  /** Heading of the panel, left out where the frame around it already names it. */
+  title?: string
+  /** The exporters the rows came from, each shown in the header with its own hint. */
+  sources: Array<{ name: string; title: string }>
   cards: ReactNode
   charts: ReactNode
   footer: string
@@ -92,19 +92,23 @@ interface RemoteMetricsPanelProps {
   embedded?: boolean
 }
 
-export function RemoteMetricsPanel({ title, source, sourceTitle, cards, charts, footer, embedded = false }: RemoteMetricsPanelProps) {
+export function RemoteMetricsPanel({ title, sources, cards, charts, footer, embedded = false }: RemoteMetricsPanelProps) {
   return (
     <div className={clsx('flex flex-col gap-4', !embedded && 'overflow-hidden rounded-sm bg-white p-4 shadow-xs dark:bg-gray-800')}>
-      <div className="flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-sm/6 font-medium text-gray-900 dark:text-gray-100">
-          <Zap className="size-4 text-gray-400 dark:text-gray-500" />
-          {title}
-        </h3>
-        <span className="text-xs/5 text-gray-500 dark:text-gray-400">
-          Collection via{' '}
-          <span className="cursor-help rounded-xs bg-gray-100 px-1.5 py-0.5 text-gray-600 dark:bg-gray-700 dark:text-gray-300" title={sourceTitle}>
-            {source}
-          </span>
+      <div className="flex items-center">
+        {title && (
+          <h3 className="flex items-center gap-2 text-sm/6 font-medium text-gray-900 dark:text-gray-100">
+            <Cpu className="size-4 text-gray-400 dark:text-gray-500" />
+            {title}
+          </h3>
+        )}
+        <span className="ml-auto flex flex-wrap items-center gap-1.5 text-xs/5 text-gray-500 dark:text-gray-400">
+          Collection via
+          {sources.map((source) => (
+            <span key={source.name} className="cursor-help rounded-xs bg-gray-100 px-1.5 py-0.5 text-gray-600 dark:bg-gray-700 dark:text-gray-300" title={source.title}>
+              {source.name}
+            </span>
+          ))}
         </span>
       </div>
 

@@ -1,5 +1,7 @@
-import type { DeviceMetricDevice, TestRemoteMetricsExporter } from '@/api/types'
-import { GAUGE_SCALE, max, mean } from './remoteMetrics'
+import type { DeviceMetricDevice, DeviceMetrics, TestRemoteMetricsExporter } from '@/api/types'
+import { reduceGpuMetrics, type GpuSummary } from './gpuMetrics'
+import { reduceNodeMetrics, type NodeSummary } from './nodeMetrics'
+import { GAUGE_SCALE, NO_METRICS, host, max, mean } from './remoteMetrics'
 
 /** The instant column that leads every row, in milliseconds after the proving window started. */
 const AT_MS = 'at_ms'
@@ -29,9 +31,6 @@ export const NODE_TRACE_COLUMN = {
 } as const
 
 const GIB = 1024 ** 3
-
-/** The machine a device sits on, the node label when the configuration set one and the device key otherwise. */
-const host = (device: DeviceMetricDevice) => device.labels.node ?? device.key
 
 /** One device as a line of [seconds, value] points. A null value breaks the line. */
 export interface TraceSeries {
@@ -69,7 +68,7 @@ export interface NodeTraces {
 }
 
 /** Four hues far apart on the wheel, one per node in the order of the sorted node labels. */
-const NODE_HUES = [217, 25, 142, 271]
+export const NODE_HUES = [217, 25, 142, 271]
 
 /**
  * deviceColors gives the devices of a node one hue and spreads them over a
@@ -159,18 +158,75 @@ export function reduceGpuTraces(exporter: TestRemoteMetricsExporter): GpuTraces 
     pcieRx: trace([TRACE_COLUMN.pcieRx], gigabytesPerSecond),
     pcieTx: trace([TRACE_COLUMN.pcieTx], gigabytesPerSecond),
     // Power and heat can throttle the same instant, so the larger of the two
-    // nanoseconds per second rates bounds the share at 100 percent.
-    throttled: trace([TRACE_COLUMN.powerViolation, TRACE_COLUMN.thermalViolation], (power, thermal) => (Math.max(power, thermal) / 1e9) * 100),
+    // nanoseconds per second rates measures the share. A refresh can land
+    // inside a shorter observed span, so the share is capped like the others.
+    throttled: trace([TRACE_COLUMN.powerViolation, TRACE_COLUMN.thermalViolation], (power, thermal) => Math.min(Math.max(power, thermal) / 1e9, 1) * 100),
     tempMargin: trace([TRACE_COLUMN.tempMargin], gauge),
   }
 }
 
-export function reduceNodeTraces(exporter: TestRemoteMetricsExporter): NodeTraces {
+/**
+ * reduceNodeTraces reads the node trace of one block. CPU busy plots on the
+ * scale of the run charts, where one fully busy processor reads 100 percent,
+ * so it needs the core count of each node, keyed by node label. A node whose
+ * core count is unknown reads the share of the whole machine instead.
+ */
+export function reduceNodeTraces(exporter: TestRemoteMetricsExporter, cpuCores: Record<string, number> = {}): NodeTraces {
   const { trace, summary } = traceReader(exporter, host)
 
   return {
     summary,
-    cpuBusy: trace([NODE_TRACE_COLUMN.cpuBusy], percent),
+    // A series is named after the node it came from, so a rig of unequal
+    // machines scales each line by the processors of that machine.
+    cpuBusy: trace([NODE_TRACE_COLUMN.cpuBusy], percent)?.map((series) => {
+      const cores = cpuCores[series.name] ?? 1
+
+      return { ...series, data: series.data.map(([at, value]): [number, number | null] => [at, value === null ? null : value * cores]) }
+    }),
     ramUsedGiB: trace([NODE_TRACE_COLUMN.memTotal, NODE_TRACE_COLUMN.memAvailable], (total, available) => (total - available) / GAUGE_SCALE / GIB),
+  }
+}
+
+/**
+ * tracePeak reads the highest interval any device of a trace reached, with the
+ * device that reached it, so a figure read against the capacity of one machine
+ * keeps the two together.
+ */
+export function tracePeak(series: TraceSeries[] | undefined) {
+  const points = (series ?? []).flatMap(({ name, data }) => data.flatMap(([, value]) => (value === null ? [] : [{ name, value }])))
+
+  return points.reduce<(typeof points)[number] | null>((top, point) => (top === null || point.value > top.value ? point : top), null)
+}
+
+/**
+ * BlockMetrics holds one test of the run artifacts, the figures the cards of
+ * the test modal read beside the peaks of its traces. Counters reduced over
+ * the whole proving window give means and totals that samples cannot. A test
+ * file can hold more than one block, so every figure pools all of them, as the
+ * window and the traces of the modal do.
+ */
+export interface BlockMetrics {
+  gpu: GpuSummary | null
+  node: NodeSummary | null
+  hasPower: boolean
+  hasPcieRate: boolean
+  hasDuration: boolean
+}
+
+export function reduceBlockMetrics(
+  deviceMetrics: DeviceMetrics | null | undefined,
+  nodeMetrics: DeviceMetrics | null | undefined,
+  testName: string,
+): BlockMetrics {
+  const block = { includeTest: (name: string) => name === testName }
+  const gpu = reduceGpuMetrics(deviceMetrics ?? NO_METRICS, block)
+  const node = reduceNodeMetrics(nodeMetrics ?? NO_METRICS, block)
+
+  return {
+    gpu: gpu.summary.blocks > 0 ? gpu.summary : null,
+    node: node.summary.blocks > 0 ? node.summary : null,
+    hasPower: gpu.hasPower,
+    hasPcieRate: gpu.hasPcieRate,
+    hasDuration: gpu.hasDuration,
   }
 }

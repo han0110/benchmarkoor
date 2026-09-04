@@ -3,6 +3,7 @@ package blocklog
 import (
 	"encoding/json"
 	"io"
+	"slices"
 	"sync"
 )
 
@@ -12,7 +13,13 @@ type Collector interface {
 	// RegisterBlockHash registers a blockHash for a test name.
 	// When a log line with this blockHash is seen, it will be associated with the test.
 	// If the log already arrived (buffered in unmatched), it's immediately associated.
+	// Tests that share a blockHash are served in registration order.
 	RegisterBlockHash(testName, blockHash string)
+
+	// ReleaseBlockHash drops a pending registration, so a test that shares the
+	// blockHash is no longer held behind it. It does nothing when the test does
+	// not wait on the blockHash.
+	ReleaseBlockHash(testName, blockHash string)
 
 	// GetBlockLogs returns all captured block logs mapped by test name.
 	GetBlockLogs() map[string]json.RawMessage
@@ -28,9 +35,9 @@ func NewCollector(parser Parser, downstream io.Writer) Collector {
 	return &collector{
 		parser:        parser,
 		downstream:    downstream,
-		pendingHashes: make(map[string]string, 64),
+		pendingHashes: make(map[string][]string, 64),
 		blockLogs:     make(map[string]json.RawMessage, 64),
-		unmatched:     make(map[string]json.RawMessage, 64),
+		unmatched:     make(map[string][]json.RawMessage, 64),
 	}
 }
 
@@ -39,9 +46,9 @@ type collector struct {
 	downstream io.Writer
 
 	mu            sync.RWMutex
-	pendingHashes map[string]string          // blockHash -> testName (awaiting log)
-	blockLogs     map[string]json.RawMessage // testName -> payload (matched)
-	unmatched     map[string]json.RawMessage // blockHash -> payload (logs before registration)
+	pendingHashes map[string][]string          // blockHash -> test names in registration order (awaiting logs)
+	blockLogs     map[string]json.RawMessage   // testName -> payload (matched)
+	unmatched     map[string][]json.RawMessage // blockHash -> payloads in arrival order (logs before registration)
 
 	// Line buffering for the writer.
 	bufMu   sync.Mutex
@@ -52,21 +59,48 @@ type collector struct {
 var _ Collector = (*collector)(nil)
 
 // RegisterBlockHash registers a blockHash for a test name.
-// If a log with this hash was already seen, it's immediately matched.
+// If a log with this hash was already seen, the oldest one is immediately matched.
 func (c *collector) RegisterBlockHash(testName, blockHash string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Check if we already have a buffered log for this hash (late registration).
-	if payload, ok := c.unmatched[blockHash]; ok {
-		c.blockLogs[testName] = payload
-		delete(c.unmatched, blockHash)
+	// Take the oldest buffered log for this hash (late registration).
+	if payloads := c.unmatched[blockHash]; len(payloads) > 0 {
+		c.blockLogs[testName] = payloads[0]
+
+		if len(payloads) == 1 {
+			delete(c.unmatched, blockHash)
+		} else {
+			c.unmatched[blockHash] = payloads[1:]
+		}
 
 		return
 	}
 
-	// Otherwise, register and wait for the log to arrive.
-	c.pendingHashes[blockHash] = testName
+	// Otherwise, queue behind the tests that already wait for this hash.
+	c.pendingHashes[blockHash] = append(c.pendingHashes[blockHash], testName)
+}
+
+// ReleaseBlockHash drops a pending registration, keeping the order of the
+// tests that stay.
+func (c *collector) ReleaseBlockHash(testName, blockHash string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	pending := c.pendingHashes[blockHash]
+
+	index := slices.Index(pending, testName)
+	if index < 0 {
+		return
+	}
+
+	if len(pending) == 1 {
+		delete(c.pendingHashes, blockHash)
+
+		return
+	}
+
+	c.pendingHashes[blockHash] = slices.Delete(pending, index, index+1)
 }
 
 // GetBlockLogs returns all captured block logs.
@@ -150,14 +184,18 @@ func (w *collectorWriter) Write(p []byte) (n int, err error) {
 			// Extract blockHash from the payload.
 			if blockHash, hashOK := extractBlockHashFromPayload(payload); hashOK {
 				w.collector.mu.Lock()
-				// Check if we have a pending registration for this hash.
-				if testName, pending := w.collector.pendingHashes[blockHash]; pending {
-					// Match found: store payload and clean up.
-					w.collector.blockLogs[testName] = payload
-					delete(w.collector.pendingHashes, blockHash)
+				// Give the payload to the oldest test waiting for this hash.
+				if pending := w.collector.pendingHashes[blockHash]; len(pending) > 0 {
+					w.collector.blockLogs[pending[0]] = payload
+
+					if len(pending) == 1 {
+						delete(w.collector.pendingHashes, blockHash)
+					} else {
+						w.collector.pendingHashes[blockHash] = pending[1:]
+					}
 				} else {
 					// No registration yet: buffer for late registration.
-					w.collector.unmatched[blockHash] = payload
+					w.collector.unmatched[blockHash] = append(w.collector.unmatched[blockHash], payload)
 				}
 				w.collector.mu.Unlock()
 			}

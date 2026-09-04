@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -69,6 +71,66 @@ func TestValidateRejectsARepeatedNodeAndKind(t *testing.T) {
 	err := cfg.Validate()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "twice")
+}
+
+// TestDeviceIDsReachTheEndpointFromTheConfigFile covers the key over the path
+// a run takes, which decodes through viper rather than the yaml tags.
+func TestDeviceIDsReachTheEndpointFromTheConfigFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "benchmarkoor.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`runner:
+  remote_metrics:
+    enabled: true
+    endpoints:
+      - kind: dcgm-exporter
+        url: http://10.0.0.1:9401/metrics
+        labels: { node: node1 }
+        device_ids: [0, 2]
+`), 0o644))
+
+	cfg, err := Load(path)
+	require.NoError(t, err)
+
+	endpoints := cfg.Runner.RemoteMetrics.Endpoints
+	require.Len(t, endpoints, 1)
+	assert.Equal(t, []int{0, 2}, endpoints[0].DeviceIDs)
+	assert.NoError(t, cfg.Runner.RemoteMetrics.Validate())
+}
+
+// TestValidateRejectsDeviceIDsOnANodeEndpoint covers the key on the wrong
+// kind. Only a DCGM series carries a gpu label, so the endpoint would report
+// nothing at all.
+func TestValidateRejectsDeviceIDsOnANodeEndpoint(t *testing.T) {
+	cfg := enabledRemoteMetrics(RemoteMetricEndpoint{
+		Kind: "node-exporter", URL: "http://10.0.0.1:9402/metrics", Labels: node("node1"), DeviceIDs: []int{0},
+	})
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "endpoint 0")
+	assert.Contains(t, err.Error(), "device_ids")
+}
+
+func TestValidateRejectsARepeatedDeviceID(t *testing.T) {
+	cfg := enabledRemoteMetrics(RemoteMetricEndpoint{
+		Kind: "dcgm-exporter", URL: "http://10.0.0.1:9401/metrics", Labels: node("node1"), DeviceIDs: []int{0, 1, 0},
+	})
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "twice")
+}
+
+// TestValidateRejectsANegativeDeviceID covers an id no gpu label carries,
+// which would drop every series of the endpoint.
+func TestValidateRejectsANegativeDeviceID(t *testing.T) {
+	cfg := enabledRemoteMetrics(RemoteMetricEndpoint{
+		Kind: "dcgm-exporter", URL: "http://10.0.0.1:9401/metrics", Labels: node("node1"), DeviceIDs: []int{-1},
+	})
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "endpoint 0")
+	assert.Contains(t, err.Error(), "device_ids")
 }
 
 func TestValidateIgnoresADisabledFeature(t *testing.T) {

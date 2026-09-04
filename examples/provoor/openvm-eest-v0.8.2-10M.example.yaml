@@ -20,15 +20,19 @@ runner:
       - kind: dcgm-exporter
         url: http://${NODE1_IP}:9401/metrics
         labels: { node: node1 }
+        device_ids: [0, 1, 2, 3]
       - kind: dcgm-exporter
         url: http://${NODE2_IP}:9401/metrics
         labels: { node: node2 }
+        device_ids: [0, 1, 2, 3]
       - kind: dcgm-exporter
         url: http://${NODE3_IP}:9401/metrics
         labels: { node: node3 }
+        device_ids: [0, 1, 2, 3]
       - kind: dcgm-exporter
         url: http://${NODE4_IP}:9401/metrics
         labels: { node: node4 }
+        device_ids: [0, 1, 2, 3]
       - kind: node-exporter
         url: http://${NODE1_IP}:9402/metrics
         labels: { node: node1 }

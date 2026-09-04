@@ -11,8 +11,9 @@ import (
 )
 
 // schemaVersion travels with the artifact so a reader can reject a shape it
-// does not understand.
-const schemaVersion = 2
+// does not understand. Version 1 stores the totals of secondsCounters at
+// gaugeScale and every other counter total whole.
+const schemaVersion = 1
 
 // Artifact is the reduced result of a whole run.
 //
@@ -49,13 +50,21 @@ var leadingColumns = []string{"device", "scrapes", "updates", "duration_ms"}
 // same number with a decimal point.
 const gaugeScale = 10000
 
+// secondsCounters names the counters measured in seconds. A second is coarse
+// against a block window, so these keep four decimals while a count of events
+// stays whole.
+var secondsCounters = set("node_cpu_seconds_total", "node_cpu_busy_seconds_total")
+
 // statistic picks one named statistic out of a reduced metric, with the scale
 // it is stored at. A counter carries a total and a peak rate. A gauge carries
 // a mean, a minimum and a maximum. A name of the other kind reports nothing
 // rather than a zero.
-func statistic(stat Stat, kind Kind, name string) (float64, float64, bool) {
+func statistic(stat Stat, kind Kind, metric, name string) (float64, float64, bool) {
 	switch {
 	case kind == KindCounter && name == "total":
+		if _, seconds := secondsCounters[metric]; seconds {
+			return stat.Total, gaugeScale, true
+		}
 		return stat.Total, 1, true
 	case kind == KindCounter && name == "rate_max":
 		return stat.PeakRate, 1, true
@@ -306,7 +315,7 @@ func (c *Collector) row(window DeviceWindow, duration time.Duration) []*int64 {
 		stat := window.Metrics[metric]
 		kind := c.scraper.kindOf(metric)
 		for _, name := range artifactColumns[window.Exporter][metric] {
-			value, scale, ok := statistic(stat, kind, name)
+			value, scale, ok := statistic(stat, kind, metric, name)
 			if !ok {
 				continue
 			}

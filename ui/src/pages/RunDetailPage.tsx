@@ -14,11 +14,10 @@ import { MetadataLabels } from '@/components/run-detail/MetadataLabels'
 import { GitHubSection } from '@/components/run-detail/GitHubSection'
 import { FilesPanel } from '@/components/run-detail/FilesPanel'
 import { ResourceUsageCharts } from '@/components/run-detail/ResourceUsageCharts'
-import { GpuMetricsCharts } from '@/components/run-detail/GpuMetricsCharts'
-import { NodeMetricsCharts } from '@/components/run-detail/NodeMetricsCharts'
+import { RemoteMetricsCharts } from '@/components/run-detail/RemoteMetricsCharts'
 import { TestsTable, type TestSortColumn, type TestSortDirection, type TestStatusFilter } from '@/components/run-detail/TestsTable'
 import { PreRunStepsTable } from '@/components/run-detail/PreRunStepsTable'
-import { TestHeatmap, type SortMode, type GroupMode } from '@/components/run-detail/TestHeatmap'
+import { TestHeatmap, TEST_MODAL_TABS, type SortMode, type GroupMode, type TestModalTab } from '@/components/run-detail/TestHeatmap'
 import { OpcodeHeatmap } from '@/components/suite-detail/OpcodeHeatmap'
 import { OpcodeDiffPanel, type OpcodeDiffRow } from '@/components/run-detail/OpcodeDiffPanel'
 import { LoadingState } from '@/components/shared/Spinner'
@@ -156,7 +155,7 @@ export function RunDetailPage() {
     blFs?: boolean // Block Logs fullscreen
     dlModal?: boolean // Download list modal
     dlFmt?: string // Download list format
-    testStep?: string // Active step tab in test modal (test/setup/cleanup)
+    testStep?: string // Active tab in test modal (test/setup/cleanup/pipeline/remote)
     testExec?: string // Expanded execution row indices (comma-separated)
   }
   const page = Number(search.page) || 1
@@ -164,7 +163,7 @@ export function RunDetailPage() {
   const heatmapThreshold = search.heatmapThreshold ? Number(search.heatmapThreshold) : undefined
   const stepFilter = parseStepFilter(search.steps)
   const { sortBy = 'order', sortDir = 'asc', q = '', status = 'all', testModal, preRunModal, heatmapGroup, heatmapSort, ohFs = false, blFs = false, dlModal = false, dlFmt, testStep, testExec } = search
-  const activeStepTab = (testStep === 'setup' || testStep === 'cleanup') ? testStep : testStep === 'test' ? testStep : undefined
+  const activeStepTab = TEST_MODAL_TABS.find((tab) => tab === testStep)
   const expandedExecRows = testExec ? new Set(testExec.split(',').map(Number).filter(n => !isNaN(n))) : undefined
 
   const { data: liveRuns, isLoading: liveRunsLoading } = useLiveRuns()
@@ -352,7 +351,7 @@ export function RunDetailPage() {
     updateSearch({ testModal: testName, testStep: undefined, testExec: undefined })
   }
 
-  const handleStepTabChange = (tab: 'test' | 'setup' | 'cleanup') => {
+  const handleStepTabChange = (tab: TestModalTab) => {
     // Clear expanded rows when switching tabs
     updateSearch({ testStep: tab !== 'test' ? tab : undefined, testExec: undefined })
   }
@@ -742,7 +741,7 @@ export function RunDetailPage() {
 
       <GitHubSection labels={config.metadata?.labels} />
 
-      <RunConfiguration instance={config.instance} system={config.system} startBlock={config.start_block} metadata={config.metadata} benchmarkoorVersion={config.benchmarkoor_version} />
+      <RunConfiguration instance={config.instance} system={config.system} startBlock={config.start_block} metadata={config.metadata} benchmarkoorVersion={config.benchmarkoor_version} nodeMetrics={nodeMetrics} deviceMetrics={deviceMetrics} />
 
       {stateActorManifest && <StateActorConfiguration manifest={stateActorManifest} runId={runId} />}
 
@@ -795,6 +794,7 @@ export function RunDetailPage() {
               )}
             </div>
           </div>
+
           <div className="overflow-hidden rounded-sm bg-white shadow-xs dark:bg-gray-800">
             <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
               <Flame className="size-4 text-gray-400 dark:text-gray-500" />
@@ -917,6 +917,16 @@ export function RunDetailPage() {
               : config.system.cpu_cores}
           />
 
+          <RemoteMetricsCharts
+            nodeMetrics={nodeMetrics}
+            deviceMetrics={deviceMetrics}
+            suiteTests={mergedSuiteTests ?? suite?.tests}
+            searchQuery={q}
+            tests={result.tests}
+            statusFilter={status}
+            onTestClick={handleTestModalChange}
+          />
+
           {result.pre_run_steps && Object.keys(result.pre_run_steps).length > 0 && (
             <PreRunStepsTable
               preRunSteps={result.pre_run_steps}
@@ -946,27 +956,6 @@ export function RunDetailPage() {
             onTestClick={handleTestModalChange}
           />
 
-          {deviceMetrics && (
-            <GpuMetricsCharts
-              metrics={deviceMetrics}
-              suiteTests={mergedSuiteTests ?? suite?.tests}
-              searchQuery={q}
-              tests={result.tests}
-              statusFilter={status}
-              onTestClick={handleTestModalChange}
-            />
-          )}
-
-          {nodeMetrics && (
-            <NodeMetricsCharts
-              metrics={nodeMetrics}
-              suiteTests={mergedSuiteTests ?? suite?.tests}
-              searchQuery={q}
-              tests={result.tests}
-              statusFilter={status}
-              onTestClick={handleTestModalChange}
-            />
-          )}
         </>
       )}
 
