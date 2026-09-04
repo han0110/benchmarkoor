@@ -92,6 +92,7 @@ type LiveTestStats struct {
 // BlockLogCollector is an interface for capturing JSON payloads from client logs.
 type BlockLogCollector interface {
 	RegisterBlockHash(testName, blockHash string)
+	ReleaseBlockHash(testName, blockHash string)
 }
 
 // BlockWindowRecorder receives the instants one block payload occupied, so a
@@ -973,9 +974,12 @@ func (e *executor) runStepLines(
 		}
 
 		// Register blockHash BEFORE the RPC call for block payload methods.
+		var registeredBlockHash string
+
 		if captureBlockLogs && jsonrpc.IsBlockPayloadMethod(method) &&
 			opts.BlockLogCollector != nil && result != nil {
 			if blockHash, hashErr := extractBlockHash(line); hashErr == nil {
+				registeredBlockHash = blockHash
 				opts.BlockLogCollector.RegisterBlockHash(result.TestFile, blockHash)
 			}
 		}
@@ -1012,6 +1016,10 @@ func (e *executor) runStepLines(
 			consecutiveUnreachable++
 
 			if consecutiveUnreachable >= unreachableClientThreshold {
+				if registeredBlockHash != "" {
+					opts.BlockLogCollector.ReleaseBlockHash(result.TestFile, registeredBlockHash)
+				}
+
 				return fmt.Errorf(
 					"client at %s unreachable for %d consecutive calls (last: %w) — "+
 						"it has most likely exited; abandoning %q at line %d of %d",
@@ -1094,6 +1102,13 @@ func (e *executor) runStepLines(
 				"method": method,
 				"step":   stepName,
 			}).WithError(validationErr).Warn("Response validation failed")
+		}
+
+		// A block that was never proved prints no block log line, so release the
+		// registration. It would otherwise hold the queue for the block hash and
+		// take the line of a test that replays the same block.
+		if !succeeded && registeredBlockHash != "" {
+			opts.BlockLogCollector.ReleaseBlockHash(result.TestFile, registeredBlockHash)
 		}
 
 		if !retried && opts.BlockWindowRecorder != nil &&

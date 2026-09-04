@@ -1,38 +1,39 @@
-import { useCallback, useMemo, useState } from 'react'
-import type { DeviceMetrics, SuiteTest, TestEntry } from '@/api/types'
+import { useMemo } from 'react'
 import { reduceGpuMetrics, type GpuDataPoint } from '@/utils/gpuMetrics'
+import { NO_METRICS } from '@/utils/remoteMetrics'
 import { useNameDisplayMode } from '@/hooks/useNameDisplayMode'
-import type { TestStatusFilter } from './TestsTable'
-import { ChartSection, RemoteMetricsPanel, StatCard } from './RemoteMetricsPanel'
-import { BUSIEST_COLOR, PERCENT_FLOOR, figure, useChartOptionBuilder, useDarkMode, useStatusFilter, type Series } from './remoteMetricsChart'
+import { ChartSection, StatCard } from './RemoteMetricsPanel'
+import {
+  BUSIEST_COLOR,
+  PERCENT_FLOOR,
+  figure,
+  useChartOptionBuilder,
+  useDarkMode,
+  useStatusFilter,
+  type RemoteMetricsSection,
+  type RemoteMetricsSectionProps,
+  type Series,
+} from './remoteMetricsChart'
 
 const describeGpus = (point: GpuDataPoint) => `GPUs: ${point.busyDevices} busy of ${point.devices} reporting`
 
-interface GpuMetricsChartsProps {
-  metrics: DeviceMetrics
-  /** Suite tests in canonical run order, so Test # matches the other charts. */
-  suiteTests?: SuiteTest[]
-  /** Only tests whose name matches this query are charted. */
-  searchQuery?: string
-  /** Test results, which carry the pass or fail state the status filter reads. */
-  tests?: Record<string, TestEntry>
-  statusFilter?: TestStatusFilter
-  onTestClick?: (testName: string) => void
-}
-
-export function GpuMetricsCharts({ metrics, suiteTests, searchQuery, tests, statusFilter = 'all', onTestClick }: GpuMetricsChartsProps) {
+/** The GPU half of the remote metrics section, absent from a run that charts no GPU. */
+export function useGpuMetricsSection({
+  metrics,
+  suiteTests,
+  searchQuery,
+  tests,
+  statusFilter = 'all',
+  onTestClick,
+  zoomRange,
+  onZoom,
+}: RemoteMetricsSectionProps): RemoteMetricsSection | null {
   const isDark = useDarkMode()
   const { mode: nameMode } = useNameDisplayMode()
-  const [zoomRange, setZoomRange] = useState({ start: 0, end: 100 })
-
-  const handleZoom = useCallback((start: number, end: number) => {
-    setZoomRange({ start, end })
-  }, [])
-
   const includeTest = useStatusFilter(tests, statusFilter)
 
   const { dataPoints, summary, hasPower, hasPcieRate, hasDuration } = useMemo(
-    () => reduceGpuMetrics(metrics, { suiteTests, searchQuery, includeTest }),
+    () => reduceGpuMetrics(metrics ?? NO_METRICS, { suiteTests, searchQuery, includeTest }),
     [metrics, suiteTests, searchQuery, includeTest],
   )
 
@@ -81,43 +82,38 @@ export function GpuMetricsCharts({ metrics, suiteTests, searchQuery, tests, stat
   }
 
   const chart = (title: string, option: object) => (
-    <ChartSection title={title} option={option} onZoom={handleZoom} onPointClick={onTestClick} highlightedTestRef={highlightedTestRef} />
+    <ChartSection title={title} option={option} onZoom={onZoom} onPointClick={onTestClick} highlightedTestRef={highlightedTestRef} />
   )
 
-  return (
-    <RemoteMetricsPanel
-      title="Remote GPU Metrics"
-      source="dcgm-exporter"
-      sourceTitle="Counters and gauges scraped from the DCGM exporter on every node, reduced over each block's proving window"
-      cards={
-        <>
-          <StatCard label="GPUs" value={`${summary.devices}`} />
-          <StatCard label="Blocks" value={`${summary.blocks}`} />
-          {hasPower && <StatCard label="Mean GPU Power" value={`${figure(summary.meanWatts, 0)} W`} />}
-          {hasPower && <StatCard label="Peak GPU Power" value={`${figure(summary.peakWatts, 0)} / ${figure(summary.powerLimit, 0)} W`} />}
-          <StatCard label="Mean SM Active" value={`${figure(summary.meanSmActive, 1)}%`} />
-          <StatCard label="Peak SM Active" value={`${figure(summary.peakSmActive, 1)}%`} />
-          <StatCard label="Peak Frame Buffer" value={`${figure(summary.peakFbUsed, 1)} / ${figure(summary.fbTotal, 1)} GiB`} />
-          {hasPcieRate && <StatCard label="Peak PCIe Rate" value={`${figure(summary.peakLink, 2)} GB/s`} />}
-          <StatCard label="Min Temp Margin" value={`${figure(summary.minTempMargin, 0)} °C`} />
-          {hasDuration && <StatCard label="Throttled Time, All GPUs" value={`${figure(summary.throttledShare, 1)}%`} />}
-          <StatCard label="PCIe Replays" value={figure(summary.pcieReplays, 0)} />
-          <StatCard label="DCGM Refresh" value={`${figure(summary.meanRefreshRatio, 0)}%`} />
-        </>
-      }
-      charts={
-        <>
-          {hasPower && chart('GPU Power (W)', chartOptions.powerOption)}
-          {chart('SM Active %', chartOptions.smActiveOption)}
-          {chart('Integer Pipe Active %', chartOptions.intOption)}
-          {chart('SM Occupancy %', chartOptions.occupancyOption)}
-          {chart('DRAM Active %', chartOptions.dramOption)}
-          {hasPcieRate && chart('Peak PCIe Rate (GB/s)', chartOptions.pcieOption)}
-          {hasDuration && chart('Throttled Time %, Worst GPU', chartOptions.throttleOption)}
-          {chart('Min Temp Margin (°C)', chartOptions.tempOption)}
-        </>
-      }
-      footer="GPU usage per block (ordered by execution) - mean series include idle GPUs - drag slider to zoom"
-    />
-  )
+  return {
+    source: {
+      name: 'dcgm-exporter',
+      title: "Counters and gauges scraped from the DCGM exporter on every node, reduced over each block's proving window",
+    },
+    cards: (
+      <>
+        <StatCard label="Mean SM Active" value={`${figure(summary.meanSmActive, 1)}%`} />
+        <StatCard label="Peak SM Active" value={`${figure(summary.peakSmActive, 1)}%`} />
+        {hasPower && <StatCard label="Mean GPU Power" value={`${figure(summary.meanWatts, 0)} W`} />}
+        {hasPower && <StatCard label="Peak GPU Power" value={`${figure(summary.peakWatts, 0)} / ${figure(summary.powerLimit, 0)} W`} />}
+        <StatCard label="Peak Frame Buffer" value={`${figure(summary.peakFbUsed, 1)} / ${figure(summary.fbTotal, 1)} GiB`} />
+        {hasPcieRate && <StatCard label="Peak PCIe Rate" value={`${figure(summary.peakLink, 2)} GB/s`} />}
+        {hasDuration && <StatCard label="Mean Throttled Time" value={`${figure(summary.throttledShare, 1)}%`} />}
+        <StatCard label="Min Temp Margin" value={`${figure(summary.minTempMargin, 0)} °C`} />
+        <StatCard label="PCIe Replays" value={figure(summary.pcieReplays, 0)} />
+      </>
+    ),
+    charts: (
+      <>
+        {hasPower && chart('GPU Power (W)', chartOptions.powerOption)}
+        {chart('SM Active %', chartOptions.smActiveOption)}
+        {chart('Integer Pipe Active %', chartOptions.intOption)}
+        {chart('SM Occupancy %', chartOptions.occupancyOption)}
+        {chart('DRAM Active %', chartOptions.dramOption)}
+        {hasPcieRate && chart('Peak PCIe Rate (GB/s)', chartOptions.pcieOption)}
+        {hasDuration && chart('Throttled Time %, Worst GPU', chartOptions.throttleOption)}
+        {chart('Min Temp Margin (°C)', chartOptions.tempOption)}
+      </>
+    ),
+  }
 }

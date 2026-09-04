@@ -860,6 +860,11 @@ func WriteBlockLogsResult(
 		return nil
 	}
 
+	blockLogs, err := splitPipelines(resultsDir, blockLogs, owner)
+	if err != nil {
+		return fmt.Errorf("splitting pipelines out of block logs: %w", err)
+	}
+
 	resultPath := filepath.Join(resultsDir, "result.block-logs.json")
 
 	// Read existing block logs if file exists.

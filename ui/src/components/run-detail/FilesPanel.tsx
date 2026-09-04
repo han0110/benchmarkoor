@@ -118,6 +118,26 @@ function buildTestResponsesEntries(runId: string, tests: Record<string, TestEntr
   return entries
 }
 
+// The remote metric traces and the proving pipeline of a test, written
+// compressed beside the step results.
+const TEST_ARTIFACT_FILES = ['test.remote-metrics.json.gz', 'test.pipeline.json.gz'] as const
+
+function buildTestArtifactEntries(runId: string, testNames: string[]): FileEntry[] {
+  const entries: FileEntry[] = []
+  for (const testName of testNames) {
+    for (const filename of TEST_ARTIFACT_FILES) {
+      entries.push({
+        testName,
+        filename,
+        path: `runs/${runId}/${testName}/${filename}`,
+        displayPath: filename,
+        outputPath: `${runId}/${testName}/${filename}`,
+      })
+    }
+  }
+  return entries
+}
+
 function buildPostTestDumpEntries(runId: string, testNames: string[], postTestRPCCalls: PostTestRPCCallConfig[]): FileEntry[] {
   const dumpCalls = postTestRPCCalls.filter((c) => c.dump?.enabled && c.dump.filename)
   const entries: FileEntry[] = []
@@ -189,6 +209,24 @@ function buildFileTree(
           depth: 1,
         })
       }
+    }
+
+    // Remote metrics and pipeline artifacts of the test
+    for (const filename of TEST_ARTIFACT_FILES) {
+      const path = `runs/${runId}/${testName}/${filename}`
+      children.push({
+        id: path,
+        name: filename,
+        type: 'file',
+        entry: {
+          testName,
+          filename,
+          path,
+          displayPath: filename,
+          outputPath: `${runId}/${testName}/${filename}`,
+        },
+        depth: 1,
+      })
     }
 
     // Post-test RPC calls subdirectory
@@ -343,6 +381,19 @@ function FileTreeRow({
   const isAvailable = headResult?.exists ?? false
   const isJson = entry.filename.endsWith('.json')
   const FileIcon = isJson ? FileText : File
+  // The file viewer reads text, so a compressed file downloads on click.
+  const isCompressed = entry.filename.endsWith('.gz')
+  const nameClassName = 'min-w-0 truncate font-mono text-gray-900 hover:text-blue-600 dark:text-gray-100 dark:hover:text-blue-400'
+  const nameLabel = (
+    <>
+      {node.name}
+      {isChecked && !isAvailable && (
+        <span className="ml-2 rounded-full bg-yellow-100 px-1.5 py-0.5 font-sans text-xs font-medium text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300">
+          Unavailable
+        </span>
+      )}
+    </>
+  )
 
   return (
     <div
@@ -355,20 +406,21 @@ function FileTreeRow({
       {/* Spacer to align with directory chevron */}
       <span className="size-3.5 shrink-0" />
       <FileIcon className="size-4 shrink-0 text-gray-400 dark:text-gray-500" />
-      <Link
-        to="/runs/$runId/fileviewer"
-        params={{ runId }}
-        search={{ file: entry.path.replace(`runs/${runId}/`, '') }}
-        target="_blank"
-        className="min-w-0 truncate font-mono text-gray-900 hover:text-blue-600 dark:text-gray-100 dark:hover:text-blue-400"
-      >
-        {node.name}
-        {isChecked && !isAvailable && (
-          <span className="ml-2 rounded-full bg-yellow-100 px-1.5 py-0.5 font-sans text-xs font-medium text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300">
-            Unavailable
-          </span>
-        )}
-      </Link>
+      {isCompressed ? (
+        <a href={headResult?.url} download={entry.filename} className={nameClassName} title="Download">
+          {nameLabel}
+        </a>
+      ) : (
+        <Link
+          to="/runs/$runId/fileviewer"
+          params={{ runId }}
+          search={{ file: entry.path.replace(`runs/${runId}/`, '') }}
+          target="_blank"
+          className={nameClassName}
+        >
+          {nameLabel}
+        </Link>
+      )}
       <span className="mr-3 ml-auto flex shrink-0 items-center gap-2">
         <span className="w-16 text-right text-gray-500 dark:text-gray-400">
           {!isChecked ? (
@@ -480,6 +532,7 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, showDownloadList, d
   const generalEntries = useMemo(() => buildGeneralEntries(runId), [runId])
   const testStatsEntries = useMemo(() => buildTestStatsEntries(runId, tests), [runId, tests])
   const testResponsesEntries = useMemo(() => buildTestResponsesEntries(runId, tests), [runId, tests])
+  const testArtifactEntries = useMemo(() => buildTestArtifactEntries(runId, testNames), [runId, testNames])
   const postTestDumpEntries = useMemo(
     () => buildPostTestDumpEntries(runId, testNames, postTestRPCCalls ?? []),
     [runId, testNames, postTestRPCCalls],
@@ -549,12 +602,13 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, showDownloadList, d
       { key: 'general', label: 'General', entries: generalEntries },
       { key: 'test-stats', label: 'Stats', entries: testStatsEntries },
       { key: 'test-responses', label: 'Responses', entries: testResponsesEntries },
+      { key: 'test-artifacts', label: 'Remote Metrics & Pipeline', entries: testArtifactEntries },
     ]
     if (hasPostTestDumps) {
       result.push({ key: 'post-test-rpc-dumps', label: 'Post-Test RPC Dumps', entries: postTestDumpEntries })
     }
     return result
-  }, [generalEntries, testStatsEntries, testResponsesEntries, postTestDumpEntries, hasPostTestDumps])
+  }, [generalEntries, testStatsEntries, testResponsesEntries, testArtifactEntries, postTestDumpEntries, hasPostTestDumps])
 
   const toggleCategory = useCallback((key: string) => {
     setExcludedCategories((prev) => {
@@ -667,7 +721,7 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, showDownloadList, d
     URL.revokeObjectURL(url)
   }, [downloadListText, downloadFormat, runId])
 
-  const totalEntries = generalEntries.length + testStatsEntries.length + testResponsesEntries.length + postTestDumpEntries.length
+  const totalEntries = generalEntries.length + testStatsEntries.length + testResponsesEntries.length + testArtifactEntries.length + postTestDumpEntries.length
   const summary = `${totalEntries} file${totalEntries !== 1 ? 's' : ''}`
 
   return (

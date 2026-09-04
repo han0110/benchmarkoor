@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import clsx from 'clsx'
 import { Settings, Check, Copy, ChevronDown } from 'lucide-react'
-import type { InstanceConfig, SystemInfo, StartBlock } from '@/api/types'
+import type { DeviceMetrics, InstanceConfig, SystemInfo, StartBlock } from '@/api/types'
 import { formatBytes, formatFrequency } from '@/utils/format'
+import { ClusterConfiguration } from './ClusterConfiguration'
 
 interface RunConfigurationProps {
   instance: InstanceConfig
@@ -12,6 +13,10 @@ interface RunConfigurationProps {
     labels?: Record<string, string>
   }
   benchmarkoorVersion?: string
+  /** The node exporter artifact, absent from a run that collected none. */
+  nodeMetrics?: DeviceMetrics | null
+  /** The DCGM exporter artifact, absent from a run that collected none. */
+  deviceMetrics?: DeviceMetrics | null
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -46,7 +51,7 @@ function InfoItem({ label, value }: { label: string; value: string | number }) {
   )
 }
 
-export function RunConfiguration({ instance, system, startBlock, metadata, benchmarkoorVersion }: RunConfigurationProps) {
+export function RunConfiguration({ instance, system, startBlock, metadata, benchmarkoorVersion, nodeMetrics, deviceMetrics }: RunConfigurationProps) {
   const [expanded, setExpanded] = useState(false)
 
   const shortImage = instance.image.includes('/') ? instance.image.split('/').pop()! : instance.image
@@ -571,6 +576,8 @@ export function RunConfiguration({ instance, system, startBlock, metadata, bench
                 <InfoItem label="Virtualization" value={`${system.virtualization} (${system.virtualization_role})`} />
               )}
             </dl>
+
+            <ClusterConfiguration nodeMetrics={nodeMetrics} deviceMetrics={deviceMetrics} />
 
             {/* Resource Limits */}
             {instance.resource_limits && (

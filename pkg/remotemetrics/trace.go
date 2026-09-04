@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"math"
+	"slices"
 	"sort"
 	"time"
 )
@@ -109,7 +110,7 @@ func (s *Scraper) Trace(start, end time.Time) []DeviceTrace {
 	var traces []DeviceTrace
 	for _, device := range devices {
 		exporter := s.exporters[device]
-		rows := traceRows(readings(byDevice[device], start.Add(-traceLookback), end), s.kinds, traceColumns[exporter], start)
+		rows := traceRows(readings(byDevice[device], start.Add(-traceLookback), end), s.kinds, traceColumns[exporter], start, s.interval)
 		if len(rows) == 0 {
 			continue
 		}
@@ -144,6 +145,12 @@ func readings(metrics map[string][]point, from, to time.Time) []reading {
 	return out
 }
 
+// pendingRow is a row whose rate cell waits for the counter to advance.
+type pendingRow struct {
+	row int
+	at  time.Time
+}
+
 // traceRows walks the readings in time order and measures every row against
 // the refresh before it. Readings before the window only move that base, so
 // the first row inside it rests on the refresh that preceded it rather than
@@ -154,20 +161,83 @@ func readings(metrics map[string][]point, from, to time.Time) []reading {
 // counters having advanced over the same span. Its stamp is not the refresh
 // instant, so a rate measured from it would not, and rates wait for a
 // reading that changed against the one before it.
-func traceRows(all []reading, kinds map[string]Kind, columns []traceColumn, start time.Time) [][]*int64 {
+//
+// The counters of one device do not share a refresh period, so every rate
+// column keeps its own base at the reading where that counter last changed.
+// One base for all of them divides a slow counter's advance by the period of
+// the fastest and reads several times too high.
+//
+// An advance accumulates over the whole interval since its base, so its rate
+// fills every row of that interval. A row after the last advance stays null
+// while the interval holding it can still close inside the window, and reads
+// zero once it lies further past that advance than the longest gap between
+// two advances. A counter that never advances reads zero in every row, and
+// one that advances once has no observed period, so its rows stay null.
+func traceRows(all []reading, kinds map[string]Kind, columns []traceColumn, start time.Time, interval time.Duration) [][]*int64 {
 	var rows [][]*int64
-	var previous, refresh *reading
+	var previous *reading
+	bases := map[string]*reading{}
+	advances := map[string]time.Time{}
+	periods := map[string]time.Duration{}
+	pending := map[string][]pendingRow{}
+	unmeasured := map[string][]pendingRow{}
 	for i := range all {
 		current := &all[i]
 		if i > 0 && !refreshed(all[i-1], *current, kinds) {
 			continue
 		}
+		row := -1
 		if !current.at.Before(start) {
-			rows = append(rows, traceRow(previous, refresh, *current, columns, start))
+			rows = append(rows, traceRow(previous, *current, columns, start))
+			row = len(rows) - 1
+		}
+		for cell, column := range columns {
+			value, ok := current.values[column.metric]
+			if column.stat != "rate" || !ok {
+				continue
+			}
+			if row >= 0 {
+				pending[column.metric] = append(pending[column.metric], pendingRow{row: row, at: current.at})
+			}
+			if previous == nil {
+				continue
+			}
+			// A previous reading without the counter reads zero and would
+			// fabricate an advance.
+			before, had := previous.values[column.metric]
+			if !had || value == before {
+				continue
+			}
+			// An interval that closes without a rate, at a reset or before the
+			// first base, leaves its rows for the tail rule. The next advance
+			// does not cover them.
+			if measure := rate(bases[column.metric], *current, column, interval); measure != nil {
+				for _, filled := range pending[column.metric] {
+					rows[filled.row][cell+1] = measure
+				}
+			} else {
+				unmeasured[column.metric] = append(unmeasured[column.metric], pending[column.metric]...)
+			}
+			pending[column.metric] = nil
+			if value > before {
+				if last := advances[column.metric]; !last.IsZero() {
+					periods[column.metric] = max(periods[column.metric], current.at.Sub(last))
+				}
+				advances[column.metric] = current.at
+			}
+			bases[column.metric] = current
 		}
 		previous = current
-		if i > 0 {
-			refresh = current
+	}
+	for cell, column := range columns {
+		if column.stat != "rate" {
+			continue
+		}
+		last, period := advances[column.metric], periods[column.metric]
+		for _, waiting := range slices.Concat(unmeasured[column.metric], pending[column.metric]) {
+			if last.IsZero() || (period > 0 && waiting.at.Sub(last) > period) {
+				rows[waiting.row][cell+1] = measured(0)
+			}
 		}
 	}
 	return rows
@@ -190,11 +260,10 @@ func refreshed(previous, current reading, kinds map[string]Kind) bool {
 }
 
 // traceRow renders one refresh. Shares are measured against the previous
-// reading and rates against the previous confirmed refresh. A metric the
-// reading lacks, a share whose reference did not move, a rate without a
-// refresh to measure from, and a counter that fell all read null rather than
-// zero.
-func traceRow(previous, refresh *reading, current reading, columns []traceColumn, start time.Time) []*int64 {
+// reading, and every rate is left for traceRows to fill once its counter
+// advances again. A metric the reading lacks, a share whose reference did not
+// move, and a counter that fell all read null rather than zero.
+func traceRow(previous *reading, current reading, columns []traceColumn, start time.Time) []*int64 {
 	row := make([]*int64, 0, 1+len(columns))
 	row = append(row, measured(current.at.Sub(start).Milliseconds()))
 	for _, column := range columns {
@@ -209,7 +278,7 @@ func traceRow(previous, refresh *reading, current reading, columns []traceColumn
 		case "share":
 			row = append(row, share(previous, current, column))
 		case "rate":
-			row = append(row, rate(refresh, current, column))
+			row = append(row, nil)
 		}
 	}
 	return row
@@ -242,7 +311,7 @@ func share(base *reading, current reading, column traceColumn) *int64 {
 	return quantise(math.Min(numerator/denominator, 1), gaugeScale)
 }
 
-func rate(base *reading, current reading, column traceColumn) *int64 {
+func rate(base *reading, current reading, column traceColumn, interval time.Duration) *int64 {
 	moved, ok := advance(base, current, column.metric)
 	if !ok {
 		return nil
@@ -251,7 +320,7 @@ func rate(base *reading, current reading, column traceColumn) *int64 {
 	if span <= 0 {
 		return nil
 	}
-	return quantise(moved/span, 1)
+	return quantise(moved/math.Max(span, interval.Seconds()), 1)
 }
 
 // TestArtifact is the per test file, one section per exporter that had a

@@ -81,6 +81,7 @@ runner:
   #       url: http://10.0.0.1:9401/metrics
   #       labels:
   #         node: node1
+  #       device_ids: [0, 1]   # dcgm-exporter only, keeps idle GPUs out of the results
   #     - kind: node-exporter
   #       url: http://10.0.0.1:9402/metrics
   #       labels:

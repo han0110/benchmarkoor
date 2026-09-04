@@ -1,38 +1,38 @@
-import { useCallback, useMemo, useState } from 'react'
-import type { DeviceMetrics, SuiteTest, TestEntry } from '@/api/types'
-import { reduceNodeMetrics, type NodeDataPoint } from '@/utils/nodeMetrics'
+import { useMemo } from 'react'
+import { cpuUsageFigure, reduceNodeMetrics, type NodeDataPoint } from '@/utils/nodeMetrics'
+import { NO_METRICS } from '@/utils/remoteMetrics'
 import { useNameDisplayMode } from '@/hooks/useNameDisplayMode'
-import type { TestStatusFilter } from './TestsTable'
-import { ChartSection, RemoteMetricsPanel, StatCard } from './RemoteMetricsPanel'
-import { BUSIEST_COLOR, PERCENT_FLOOR, figure, useChartOptionBuilder, useDarkMode, useStatusFilter } from './remoteMetricsChart'
+import { ChartSection, StatCard } from './RemoteMetricsPanel'
+import {
+  BUSIEST_COLOR,
+  PERCENT_FLOOR,
+  figure,
+  useChartOptionBuilder,
+  useDarkMode,
+  useStatusFilter,
+  type RemoteMetricsSection,
+  type RemoteMetricsSectionProps,
+} from './remoteMetricsChart'
 
 const describeNodes = (point: NodeDataPoint) => `Nodes: ${point.devices} reporting`
 
-interface NodeMetricsChartsProps {
-  metrics: DeviceMetrics
-  /** Suite tests in canonical run order, so Test # matches the other charts. */
-  suiteTests?: SuiteTest[]
-  /** Only tests whose name matches this query are charted. */
-  searchQuery?: string
-  /** Test results, which carry the pass or fail state the status filter reads. */
-  tests?: Record<string, TestEntry>
-  statusFilter?: TestStatusFilter
-  onTestClick?: (testName: string) => void
-}
-
-export function NodeMetricsCharts({ metrics, suiteTests, searchQuery, tests, statusFilter = 'all', onTestClick }: NodeMetricsChartsProps) {
+/** The node half of the remote metrics section, absent from a run that charts no node. */
+export function useNodeMetricsSection({
+  metrics,
+  suiteTests,
+  searchQuery,
+  tests,
+  statusFilter = 'all',
+  onTestClick,
+  zoomRange,
+  onZoom,
+}: RemoteMetricsSectionProps): RemoteMetricsSection | null {
   const isDark = useDarkMode()
   const { mode: nameMode } = useNameDisplayMode()
-  const [zoomRange, setZoomRange] = useState({ start: 0, end: 100 })
-
-  const handleZoom = useCallback((start: number, end: number) => {
-    setZoomRange({ start, end })
-  }, [])
-
   const includeTest = useStatusFilter(tests, statusFilter)
 
   const { dataPoints, summary } = useMemo(
-    () => reduceNodeMetrics(metrics, { suiteTests, searchQuery, includeTest }),
+    () => reduceNodeMetrics(metrics ?? NO_METRICS, { suiteTests, searchQuery, includeTest }),
     [metrics, suiteTests, searchQuery, includeTest],
   )
 
@@ -40,13 +40,15 @@ export function NodeMetricsCharts({ metrics, suiteTests, searchQuery, tests, sta
 
   const chartOptions = useMemo(
     () => ({
+      // One fully busy processor reads 100 percent, so the axis tops out at
+      // the processors of the node and the room under it is idle time.
       cpuOption: makeOption(
         [
           { name: 'Mean per node', color: '#0ea5e9', value: (p) => p.cpuBusy },
           { name: 'Busiest node', color: BUSIEST_COLOR, value: (p) => p.busiestCpuBusy },
         ],
-        (v) => `${v.toFixed(1)}%`,
-        undefined,
+        (v) => `${v.toFixed(0)}%`,
+        summary.cpuCores === null ? undefined : { value: summary.cpuCores * 100, label: `(${summary.cpuCores} processors)`, wholeScale: true },
         PERCENT_FLOOR,
       ),
       // Capacity stays on the tile. An axis pinned to it hides the variation
@@ -59,7 +61,7 @@ export function NodeMetricsCharts({ metrics, suiteTests, searchQuery, tests, sta
         (v) => `${v.toFixed(1)} GiB`,
       ),
     }),
-    [makeOption],
+    [makeOption, summary],
   )
 
   if (dataPoints.length === 0) {
@@ -67,30 +69,26 @@ export function NodeMetricsCharts({ metrics, suiteTests, searchQuery, tests, sta
   }
 
   const chart = (title: string, option: object) => (
-    <ChartSection title={title} option={option} onZoom={handleZoom} onPointClick={onTestClick} highlightedTestRef={highlightedTestRef} />
+    <ChartSection title={title} option={option} onZoom={onZoom} onPointClick={onTestClick} highlightedTestRef={highlightedTestRef} />
   )
 
-  return (
-    <RemoteMetricsPanel
-      title="Remote CPU/RAM Metrics"
-      source="node-exporter"
-      sourceTitle="Processor and memory counters scraped from the node exporter on every node, reduced over each block's proving window"
-      cards={
-        <>
-          <StatCard label="Nodes" value={`${summary.devices}`} />
-          <StatCard label="Blocks" value={`${summary.blocks}`} />
-          <StatCard label="Mean CPU Busy" value={`${figure(summary.meanCpuBusy, 1)}%`} />
-          <StatCard label="Peak CPU Busy" value={`${figure(summary.peakCpuBusy, 1)}%`} />
-          <StatCard label="Peak RAM Used" value={`${figure(summary.peakRamUsed, 1)} / ${figure(summary.ramTotal, 1)} GiB`} />
-        </>
-      }
-      charts={
-        <>
-          {chart('CPU Busy %', chartOptions.cpuOption)}
-          {chart('RAM Used (GiB)', chartOptions.ramOption)}
-        </>
-      }
-      footer="Machine usage per block (ordered by execution) - mean series include idle nodes - drag slider to zoom"
-    />
-  )
+  return {
+    source: {
+      name: 'node-exporter',
+      title: "Processor and memory counters scraped from the node exporter on every node, reduced over each block's proving window",
+    },
+    cards: (
+      <>
+        <StatCard label="Mean CPU Usage" value={cpuUsageFigure(summary.meanCpuBusy, summary.meanCpuCores)} />
+        <StatCard label="Peak CPU Usage" value={cpuUsageFigure(summary.peakCpuBusy, summary.peakCpuCores)} />
+        <StatCard label="Peak RAM Used" value={`${figure(summary.peakRamUsed, 1)} / ${figure(summary.ramTotal, 1)} GiB`} />
+      </>
+    ),
+    charts: (
+      <>
+        {chart('CPU Usage %', chartOptions.cpuOption)}
+        {chart('RAM Used (GiB)', chartOptions.ramOption)}
+      </>
+    ),
+  }
 }

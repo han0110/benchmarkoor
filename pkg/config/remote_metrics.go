@@ -28,10 +28,15 @@ type RemoteMetricsConfig struct {
 // attached to every series the endpoint reports, which is how node identity
 // reaches the results without the exporter having to know it. They must not
 // carry a hostname, because results are published.
+//
+// DeviceIDs holds the GPU ids a dcgm-exporter endpoint records, the values of
+// the DCGM gpu label. It keeps the GPUs a node does not prove with out of the
+// results, where an idle device pulls every mean down.
 type RemoteMetricEndpoint struct {
-	Kind   string            `yaml:"kind" mapstructure:"kind"`
-	URL    string            `yaml:"url" mapstructure:"url"`
-	Labels map[string]string `yaml:"labels" mapstructure:"labels"`
+	Kind      string            `yaml:"kind" mapstructure:"kind"`
+	URL       string            `yaml:"url" mapstructure:"url"`
+	Labels    map[string]string `yaml:"labels" mapstructure:"labels"`
+	DeviceIDs []int             `yaml:"device_ids,omitempty" mapstructure:"device_ids"`
 }
 
 // Default values for RemoteMetricsConfig when fields are left empty.
@@ -97,6 +102,27 @@ func (r *RemoteMetricsConfig) Validate() error {
 		if _, known := remotemetrics.ArtifactNames[endpoint.Kind]; !known {
 			return fmt.Errorf("remote_metrics endpoint %d kind %q is not %s or %s",
 				i, endpoint.Kind, remotemetrics.ExporterDCGM, remotemetrics.ExporterNode)
+		}
+
+		if len(endpoint.DeviceIDs) > 0 {
+			if endpoint.Kind != remotemetrics.ExporterDCGM {
+				return fmt.Errorf("remote_metrics endpoint %d lists device_ids on kind %s, which only %s accepts",
+					i, endpoint.Kind, remotemetrics.ExporterDCGM)
+			}
+
+			listed := make(map[int]struct{}, len(endpoint.DeviceIDs))
+
+			for _, id := range endpoint.DeviceIDs {
+				if id < 0 {
+					return fmt.Errorf("remote_metrics endpoint %d lists device_ids %d, which is not a gpu index", i, id)
+				}
+
+				if _, duplicate := listed[id]; duplicate {
+					return fmt.Errorf("remote_metrics endpoint %d lists device id %d twice", i, id)
+				}
+
+				listed[id] = struct{}{}
+			}
 		}
 
 		// The same node and kind twice would fold two expositions into one

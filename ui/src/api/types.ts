@@ -750,3 +750,31 @@ export interface TestRemoteMetrics {
   /** exporter name -> the devices it scraped and their rows. */
   exporters: Record<string, TestRemoteMetricsExporter>
 }
+
+export type PipelinePhase = 'execution' | 'witness' | 'base' | 'recursion' | 'wrap'
+
+export interface PipelineKind {
+  name: string
+  label: string
+  /** Legend entry the kind draws under, one shade for every kind of the entry. */
+  legend: string
+  /** Row group the kind draws on. Tasks of one worker, row group, and id share a row. */
+  row: string
+  phase: PipelinePhase
+}
+
+export interface PipelineWorker {
+  name: string
+  node: string
+}
+
+/** [kind, worker, id, startMs, durationMs, breakdown pairs of [index, ms]] */
+export type PipelineTaskRow = [number, number, string, number, number, Array<[number, number]>]
+
+export interface TestPipeline {
+  schemaVersion: number
+  kinds: PipelineKind[]
+  breakdown: string[]
+  workers: PipelineWorker[]
+  tasks: PipelineTaskRow[]
+}

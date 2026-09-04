@@ -1,4 +1,4 @@
-import type { DeviceMetrics, SuiteTest } from '@/api/types'
+import type { DeviceMetricDevice, DeviceMetrics, SuiteTest } from '@/api/types'
 import { compileQuery } from './eestNameFilter'
 
 /** Gauge columns are stored as the real value multiplied by this. */
@@ -6,12 +6,19 @@ export const GAUGE_SCALE = 10000
 
 /** Leading columns precede the metric values in every row of every artifact. */
 export const LEADING = {
+  device: 'device',
   scrapes: 'scrapes',
   updates: 'updates',
   durationMs: 'duration_ms',
 } as const
 
 export type Row = Array<number | null>
+
+/** The machine a device sits on, the node label when the configuration set one and the device key otherwise. */
+export const host = (device: DeviceMetricDevice) => device.labels.node ?? device.key
+
+/** The artifact of a run that collected none, which reduces to no points. */
+export const NO_METRICS: DeviceMetrics = { schemaVersion: 1, columns: [], devices: [], tests: {} }
 
 export interface RemoteReductionOptions {
   /** Suite tests in canonical run order, so Test # matches the other charts. */

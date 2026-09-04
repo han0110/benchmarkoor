@@ -80,7 +80,9 @@ export function BlockLogDetails({ blockLog }: BlockLogDetailsProps) {
   const subTextColor = isDark ? '#9ca3af' : '#6b7280'
 
   const { timing, throughput, state_reads, state_writes, cache, clusterReportedProvingTimeMs, statelessInputSize, proofSize } = blockLog
-  const hasTiming = timing != null && timing.total_ms != null
+  // A client that reports only the total has no components to draw.
+  const hasTiming =
+    timing != null && timing.total_ms != null && (timing.execution_ms != null || timing.state_read_ms != null || timing.state_hash_ms != null || timing.commit_ms != null)
   const hasOverhead = hasTiming && timing.state_read_ms != null && timing.state_hash_ms != null && timing.commit_ms != null
   const hasCache = cache != null && cache.account != null && cache.storage != null && cache.code != null
   const hasStateOps = state_reads != null && state_writes != null

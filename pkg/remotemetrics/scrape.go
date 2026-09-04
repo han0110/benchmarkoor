@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +56,35 @@ type Endpoint struct {
 	// exporter knowing it. They never carry a hostname, because results are
 	// published.
 	Labels map[string]string
+	// DeviceIDs limits the endpoint to the GPUs it lists, matched against the
+	// DCGM gpu label. An empty list keeps every device the exporter reports,
+	// because the scrape reads it as no limit. A node that proves with a
+	// subset of its GPUs stores the idle ones without it, and an idle device
+	// pulls every mean down.
+	DeviceIDs []int
+}
+
+// keeps reports whether a sample belongs to a device the endpoint records. A
+// sample without a listed gpu label falls outside a device list, so a series
+// of another kind never passes one.
+func (e Endpoint) keeps(metric *dto.Metric) bool {
+	if len(e.DeviceIDs) == 0 {
+		return true
+	}
+
+	for _, label := range metric.GetLabel() {
+		if label.GetName() != "gpu" {
+			continue
+		}
+
+		for _, id := range e.DeviceIDs {
+			if label.GetValue() == strconv.Itoa(id) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // series identifies one metric of one device.
@@ -265,6 +295,10 @@ func (s *Scraper) scrape(ctx context.Context, endpoint Endpoint) error {
 		s.mu.Unlock()
 
 		for _, metric := range family.GetMetric() {
+			if !endpoint.keeps(metric) {
+				continue
+			}
+
 			value, ok := sampleValue(metric, family.GetType())
 			if !ok {
 				continue
@@ -284,6 +318,12 @@ func (s *Scraper) scrape(ctx context.Context, endpoint Endpoint) error {
 	}
 
 	if len(totals) == 0 {
+		// A device list that matches nothing empties the scrape as well, so
+		// the message names it rather than blaming the exporter.
+		if len(endpoint.DeviceIDs) > 0 {
+			return fmt.Errorf("%s serves none of the %s series for device_ids %v", endpoint.URL, endpoint.Exporter, endpoint.DeviceIDs)
+		}
+
 		return fmt.Errorf("%s serves none of the %s series", endpoint.URL, endpoint.Exporter)
 	}
 

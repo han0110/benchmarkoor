@@ -11,6 +11,7 @@ import { TimeBreakdown } from './TimeBreakdown'
 import { MGasBreakdown } from './MGasBreakdown'
 import { ExecutionsList } from './ExecutionsList'
 import { BlockLogDetails } from './BlockLogDetails'
+import { TestPipeline } from './TestPipeline'
 import { TestRemoteMetrics } from './TestRemoteMetrics'
 import type { TestStatusFilter } from './TestsTable'
 import { type StepTypeOption, ALL_STEP_TYPES } from '@/pages/RunDetailPage'
@@ -18,6 +19,8 @@ import { formatDuration, formatBytes } from '@/utils/format'
 import { EESTInfoContent, type OpcodeSortMode } from '@/components/suite-detail/TestFilesList'
 import { OpcodeDiffPanel, type OpcodeDiffRow } from './OpcodeDiffPanel'
 import { useBlockLogs } from '@/api/hooks/useBlockLogs'
+import { useTestPipelineView } from '@/api/hooks/useTestPipeline'
+import { useTestRemoteMetrics } from '@/api/hooks/useTestRemoteMetrics'
 import { DEFAULT_THRESHOLD, THRESHOLD_COLORS, getColorByThreshold } from '@/utils/perfThreshold'
 
 // Aggregate stats from selected steps of a test entry
@@ -92,6 +95,10 @@ function getAggregatedStats(entry: TestEntry, stepFilter: StepTypeOption[] = ALL
 export type SortMode = 'order' | 'mgas' | 'gas'
 export type GroupMode = 'none' | 'gas'
 
+/** The tabs of the test modal, in the order they are shown. A tab of an artifact the test lacks is left out. */
+export const TEST_MODAL_TABS = ['test', 'setup', 'cleanup', 'pipeline', 'remote'] as const
+export type TestModalTab = (typeof TEST_MODAL_TABS)[number]
+
 const GAS_GROUP_STEP = 30_000_000 // 30M gas per group
 
 function getGasGroup(gasUsed: number): number {
@@ -131,8 +138,8 @@ interface TestHeatmapProps {
   onSortModeChange?: (mode: SortMode) => void
   onGroupModeChange?: (mode: GroupMode) => void
   onSearchChange?: (query: string) => void
-  activeStepTab?: 'test' | 'setup' | 'cleanup'
-  onActiveStepTabChange?: (tab: 'test' | 'setup' | 'cleanup') => void
+  activeStepTab?: TestModalTab
+  onActiveStepTabChange?: (tab: TestModalTab) => void
   expandedExecRows?: Set<number>
   onExpandedExecRowsChange?: (rows: Set<number>) => void
 }
@@ -368,13 +375,16 @@ export function TestHeatmap({
   const threshold = thresholdProp ?? DEFAULT_THRESHOLD
   const [tooltip, setTooltip] = useState<{ test: TestData; x: number; y: number } | null>(null)
   const [opcodeSort, setOpcodeSort] = useState<OpcodeSortMode>('name')
-  const [activeStepTabLocal, setActiveStepTabLocal] = useState<'test' | 'setup' | 'cleanup'>('test')
+  const [activeStepTabLocal, setActiveStepTabLocal] = useState<TestModalTab>('test')
   const activeStepTab = activeStepTabProp ?? activeStepTabLocal
-  const setActiveStepTab = (tab: 'test' | 'setup' | 'cleanup') => {
+  const setActiveStepTab = (tab: TestModalTab) => {
     setActiveStepTabLocal(tab)
     onActiveStepTabChange?.(tab)
   }
   const { data: blockLogs } = useBlockLogs(runId)
+  // The tab of an artifact the test lacks never opens on an empty body.
+  const testPipeline = useTestPipelineView(runId, selectedTest ?? '')
+  const { data: testRemoteMetrics } = useTestRemoteMetrics(runId, selectedTest ?? '')
 
   // Pop-in stagger state for newly-completed tiles. Populated below by
   // an effect that diffs the latest testData against the previous
@@ -973,22 +983,31 @@ export function TestHeatmap({
               {blockLogs?.[selectedTest] && (
                 <BlockLogDetails blockLog={blockLogs[selectedTest]} />
               )}
-              {suiteHash && entry.steps && (() => {
-                const steps = [
-                  { key: 'test' as const, label: 'Test', step: entry.steps.test },
-                  { key: 'setup' as const, label: 'Setup', step: entry.steps.setup },
-                  { key: 'cleanup' as const, label: 'Cleanup', step: entry.steps.cleanup },
-                ].filter(s => s.step)
+              {(() => {
+                const steps = suiteHash && entry.steps
+                  ? [
+                      { key: 'test' as const, label: 'Test', step: entry.steps.test },
+                      { key: 'setup' as const, label: 'Setup', step: entry.steps.setup },
+                      { key: 'cleanup' as const, label: 'Cleanup', step: entry.steps.cleanup },
+                    ].filter(s => s.step)
+                  : []
+                const tabs: Array<{ key: TestModalTab; label: string; step?: StepResult }> = [
+                  ...steps,
+                  ...(testPipeline ? [{ key: 'pipeline' as const, label: 'Proving Pipeline' }] : []),
+                  ...(testRemoteMetrics ? [{ key: 'remote' as const, label: 'Remote Metrics' }] : []),
+                ]
+                if (tabs.length === 0) return null
 
-                const activeStep = steps.find(s => s.key === activeStepTab) ?? steps[0]
+                const activeTab = tabs.find(t => t.key === activeStepTab) ?? tabs[0]
+                const activeStep = steps.find(s => s.key === activeTab.key)
                 const matchingSuiteTest = suiteTests?.find((t) => t.name === selectedTest)
 
                 return (
                   <div className="flex flex-col gap-4">
-                    {/* Step Tabs */}
+                    {/* Tabs */}
                     <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
-                      {steps.map(({ key, label, step }) => {
-                        const isActive = activeStep?.key === key
+                      {tabs.map(({ key, label, step }) => {
+                        const isActive = activeTab.key === key
                         const success = step?.aggregated?.success ?? 0
                         const fail = step?.aggregated?.fail ?? 0
                         return (
@@ -1020,8 +1039,10 @@ export function TestHeatmap({
                       })}
                     </div>
 
-                    {/* Active Step Content */}
-                    {activeStep && (
+                    {/* Active Tab Content */}
+                    {activeTab.key === 'pipeline' && testPipeline && <TestPipeline key={selectedTest} pipeline={testPipeline} />}
+                    {activeTab.key === 'remote' && <TestRemoteMetrics key={selectedTest} runId={runId} testName={selectedTest} />}
+                    {activeStep && suiteHash && (
                       <div>
                         {activeStep.step?.aggregated && (
                           <div className="flex flex-col gap-4">
@@ -1046,7 +1067,6 @@ export function TestHeatmap({
               {postTestRPCCalls && postTestRPCCalls.length > 0 && (
                 <PostTestDumps runId={runId} testName={selectedTest} calls={postTestRPCCalls} />
               )}
-              <TestRemoteMetrics runId={runId} testName={selectedTest} />
             </div>
           </Modal>
         )
