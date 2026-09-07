@@ -20,6 +20,7 @@ const columns = [
   COLUMN.pcieReplay,
   COLUMN.dramActive,
   COLUMN.smOccupancy,
+  COLUMN.gpuTemp,
   COLUMN.tempMargin,
   COLUMN.fbUsed,
   COLUMN.fbTotal,
@@ -56,6 +57,7 @@ const busy = row({
   [COLUMN.pcieReplay]: 0,
   [COLUMN.dramActive]: 0.4 * GAUGE_SCALE,
   [COLUMN.smOccupancy]: 0.3 * GAUGE_SCALE,
+  [COLUMN.gpuTemp]: 80 * GAUGE_SCALE,
   [COLUMN.tempMargin]: 10 * GAUGE_SCALE,
   [COLUMN.fbUsed]: 30720 * GAUGE_SCALE,
   [COLUMN.fbTotal]: 32768 * GAUGE_SCALE,
@@ -79,6 +81,7 @@ const idle = row({
   [COLUMN.pcieReplay]: 0,
   [COLUMN.dramActive]: 0,
   [COLUMN.smOccupancy]: 0,
+  [COLUMN.gpuTemp]: 50 * GAUGE_SCALE,
   [COLUMN.tempMargin]: 40 * GAUGE_SCALE,
   [COLUMN.fbUsed]: 1024 * GAUGE_SCALE,
   [COLUMN.fbTotal]: 32768 * GAUGE_SCALE,
@@ -122,12 +125,37 @@ describe('reduceGpuMetrics', () => {
     expect(point.pcieTxRate).toBeCloseTo(1)
     expect(point.meanWatts).toBeCloseTo(210)
     expect(point.peakWatts).toBeCloseTo(590)
-    expect(point.powerLimit).toBeCloseTo(600)
     expect(point.throttledPowerShare).toBeCloseTo(25)
     expect(point.throttledThermalShare).toBe(0)
     expect(point.tempMargin).toBeCloseTo(10)
-    expect(point.fbUsedGiB).toBeCloseTo(30)
-    expect(point.fbTotalGiB).toBeCloseTo(32)
+    expect(point.gpuTemp).toBeCloseTo(80)
+    expect(point.meanFbUsedGiB).toBeCloseTo(15.5)
+    expect(point.peakFbUsedGiB).toBeCloseTo(30)
+    expect(point.fbMarginGiB).toBeCloseTo(2)
+  })
+
+  it('reads the headroom of each GPU against its own frame buffer', () => {
+    const larger = { [COLUMN.fbUsed]: 40960 * GAUGE_SCALE, [COLUMN.fbTotal]: 81920 * GAUGE_SCALE }
+    const { dataPoints } = reduceGpuMetrics({ ...metrics, tests: { 'b.json': { '0x1': [busy, withCells(idle, larger)] } } })
+
+    expect(dataPoints[0].fbMarginGiB).toBeCloseTo(2)
+  })
+
+  it('reads a capacity only where every GPU carries the same', () => {
+    const larger = { [COLUMN.fbTotal]: 81920 * GAUGE_SCALE, [COLUMN.powerLimit]: 450 * GAUGE_SCALE }
+    const { summary } = reduceGpuMetrics({ ...metrics, tests: { 'b.json': { '0x1': [busy, withCells(idle, larger)] } } })
+
+    expect(summary.fbTotal).toBeNull()
+    expect(summary.powerLimit).toBeNull()
+    expect(summary.peakFbUsed).toBeCloseTo(30)
+  })
+
+  it('leaves the frame buffer headroom unmeasured when no GPU reported a capacity', () => {
+    const blank = { [COLUMN.fbTotal]: null }
+    const { dataPoints } = reduceGpuMetrics({ ...metrics, tests: { 'b.json': { '0x1': [withCells(busy, blank), withCells(idle, blank)] } } })
+
+    expect(dataPoints[0].peakFbUsedGiB).toBeCloseTo(30)
+    expect(dataPoints[0].fbMarginGiB).toBeNull()
   })
 
   it('summarises the run over every block', () => {
@@ -136,7 +164,7 @@ describe('reduceGpuMetrics', () => {
     expect(hasPower && hasPcieRate && hasDuration).toBe(true)
     expect(summary.blocks).toBe(2)
     expect(summary.meanSmActive).toBeCloseTo(60)
-    expect(summary.peakSmActive).toBeCloseTo(80)
+    expect(summary.maxMeanSmActive).toBeCloseTo(80)
     expect(summary.meanWatts).toBeCloseTo(305)
     expect(summary.peakWatts).toBeCloseTo(590)
     expect(summary.powerLimit).toBeCloseTo(600)
@@ -260,6 +288,7 @@ describe('reduceGpuMetrics', () => {
     expect(view.hasDuration).toBe(false)
     expect(view.dataPoints[0].smActive).toBeCloseTo(40)
     expect(view.dataPoints[0].throttledPowerShare).toBeNull()
+    expect(view.dataPoints[0].gpuTemp).toBeNull()
     expect(view.dataPoints[0].meanWatts).toBeNull()
     expect(view.summary.throttledShare).toBeNull()
     expect(view.summary.meanWatts).toBeNull()

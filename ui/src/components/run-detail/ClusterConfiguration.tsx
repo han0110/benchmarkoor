@@ -15,11 +15,17 @@ interface ClusterConfigurationProps {
 
 /** One device of the cluster and the static facts its rows carry. */
 interface DeviceFacts {
+  host: string
+  value: string
+}
+
+/** One line of the sub-section, which describes the devices that share a specification. */
+interface ClusterItemProps {
   label: string
   value: string
 }
 
-function ClusterItem({ label, value }: DeviceFacts) {
+function ClusterItem({ label, value }: ClusterItemProps) {
   return (
     <div>
       <dt className="text-xs/5 font-medium text-gray-500 dark:text-gray-400">{label}</dt>
@@ -50,7 +56,8 @@ const line = (parts: Array<string | null>) => parts.filter((part) => part !== nu
 /**
  * nodeFacts reads the size of each node. The processor count comes from the
  * seconds the node counted over the seconds a block took, as the CPU scale of
- * the charts does.
+ * the charts does. The RAM is read to whole GiB, because nodes of one model
+ * report totals that differ by some MiB and must still group together.
  */
 function nodeFacts(metrics: DeviceMetrics): DeviceFacts[] {
   const { cell } = columnReader(metrics)
@@ -67,8 +74,8 @@ function nodeFacts(metrics: DeviceMetrics): DeviceFacts[] {
     }
 
     return {
-      label: host(metrics.devices[index]),
-      value: line([cores === null ? null : `${cores} processors`, ramTotalGiB === null ? null : `${ramTotalGiB.toFixed(1)} GiB RAM`]),
+      host: host(metrics.devices[index]),
+      value: line([cores === null ? null : `${cores} processors`, ramTotalGiB === null ? null : `${Math.round(ramTotalGiB)} GiB RAM`]),
     }
   })
 }
@@ -88,7 +95,7 @@ function gpuFacts(metrics: DeviceMetrics): DeviceFacts[] {
     }
 
     return {
-      label: `${host(device)} gpu${device.labels.gpu}`,
+      host: host(device),
       value: line([
         device.labels.modelName ?? null,
         frameBufferGiB === null ? null : `${frameBufferGiB.toFixed(1)} GiB frame buffer`,
@@ -98,17 +105,46 @@ function gpuFacts(metrics: DeviceMetrics): DeviceFacts[] {
   })
 }
 
+/** The devices each host carries, named only when every host of the group carries the same count. */
+function perNode(hosts: string[]): string {
+  const counts = [...new Set(hosts)].map((name) => hosts.filter((other) => other === name).length)
+
+  return counts.every((count) => count === counts[0]) ? `, ${counts[0]} per node` : ''
+}
+
+/**
+ * clusterItems folds the devices that report the same facts into one item per
+ * specification. The count leads the value, and the hosts follow it when the
+ * cluster mixes specifications.
+ */
+function clusterItems(devices: DeviceFacts[], label: string, detail?: (hosts: string[]) => string): ClusterItemProps[] {
+  const specs = new Map<string, string[]>()
+  for (const device of devices) {
+    if (device.value !== '') specs.set(device.value, [...(specs.get(device.value) ?? []), device.host])
+  }
+
+  const groups = [...specs]
+
+  return groups.map(([value, hosts]) => ({
+    label,
+    value: `${hosts.length} x ${value}${detail?.(hosts) ?? ''}${groups.length > 1 ? ` (${[...new Set(hosts)].join(', ')})` : ''}`,
+  }))
+}
+
 /**
  * ClusterConfiguration lists the machines the exporters scraped, beside the
  * System block that describes the host benchmarkoor itself ran on.
  */
 export function ClusterConfiguration({ nodeMetrics, deviceMetrics }: ClusterConfigurationProps) {
-  const devices = useMemo(
-    () => [...(nodeMetrics ? nodeFacts(nodeMetrics) : []), ...(deviceMetrics ? gpuFacts(deviceMetrics) : [])].filter((device) => device.value !== ''),
+  const items = useMemo(
+    () => [
+      ...(nodeMetrics ? clusterItems(nodeFacts(nodeMetrics), 'Nodes') : []),
+      ...(deviceMetrics ? clusterItems(gpuFacts(deviceMetrics), 'GPUs', perNode) : []),
+    ],
     [nodeMetrics, deviceMetrics],
   )
 
-  if (!nodeMetrics && !deviceMetrics) {
+  if (items.length === 0) {
     return null
   }
 
@@ -116,10 +152,8 @@ export function ClusterConfiguration({ nodeMetrics, deviceMetrics }: ClusterConf
     <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-700">
       <h4 className="mb-3 text-sm/6 font-medium text-gray-900 dark:text-gray-100">Cluster</h4>
       <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {nodeMetrics && <ClusterItem label="Nodes" value={`${nodeMetrics.devices.length}`} />}
-        {deviceMetrics && <ClusterItem label="GPUs" value={`${deviceMetrics.devices.length}`} />}
-        {devices.map((device) => (
-          <ClusterItem key={device.label} {...device} />
+        {items.map((item) => (
+          <ClusterItem key={`${item.label} ${item.value}`} {...item} />
         ))}
       </dl>
     </div>

@@ -2,6 +2,7 @@ import type { DeviceMetrics } from '@/api/types'
 import {
   GAUGE_SCALE,
   LEADING,
+  agreed,
   columnReader,
   higher,
   lower,
@@ -37,6 +38,7 @@ export const COLUMN = {
   smOccupancy: 'DCGM_FI_PROF_SM_OCCUPANCY.mean',
   fbUsed: 'DCGM_FI_DEV_FB_USED.max',
   fbTotal: 'DCGM_FI_DEV_FB_TOTAL.max',
+  gpuTemp: 'DCGM_FI_DEV_GPU_TEMP.max',
   tempMargin: 'DCGM_FI_DEV_GPU_TEMP_MARGIN_CELSIUS.min',
 } as const
 
@@ -65,15 +67,18 @@ export interface GpuDataPoint {
   busiestSmOccupancy: number | null
   meanWatts: number | null
   peakWatts: number | null
-  powerLimit: number | null
   pcieTxRate: number | null
   pcieRxRate: number | null
   /** Share of the block the worst GPU spent throttled by its power cap. */
   throttledPowerShare: number | null
   throttledThermalShare: number | null
-  fbUsedGiB: number | null
-  fbTotalGiB: number | null
+  meanFbUsedGiB: number | null
+  peakFbUsedGiB: number | null
+  /** Headroom of the fullest GPU, which is how far the block stayed from filling a frame buffer. */
+  fbMarginGiB: number | null
   tempMargin: number | null
+  /** Temperature of the hottest GPU, which the margin reads against. */
+  gpuTemp: number | null
 }
 
 export interface GpuSummary {
@@ -81,11 +86,13 @@ export interface GpuSummary {
   /** Mean power over the blocks, each weighted by the time it took. */
   meanWatts: number | null
   peakWatts: number | null
+  /** Power cap of every GPU when they all carry the same, which is the capacity the peak reads against. */
   powerLimit: number | null
   /** Mean SM activity over the blocks, each weighted by the time it took. */
   meanSmActive: number | null
-  peakSmActive: number | null
+  maxMeanSmActive: number | null
   peakFbUsed: number | null
+  /** Frame buffer of every GPU when they all carry the same, which is the capacity the peak reads against. */
   fbTotal: number | null
   peakLink: number | null
   minTempMargin: number | null
@@ -107,17 +114,20 @@ export type GpuReductionOptions = RemoteReductionOptions
 export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOptions = {}): GpuMetricsView {
   const { has, cell, measured } = columnReader(metrics)
   const { names, order } = orderedTests(metrics, options)
+  const allRows = names.flatMap((testName) => Object.values(metrics.tests[testName]).flat())
 
   const points: GpuDataPoint[] = []
+  // Every capacity is read once over the whole run, because a figure of the
+  // rig reads against one capacity only where every GPU carries the same.
   const summary: GpuSummary = {
     blocks: 0,
     meanWatts: null,
     peakWatts: null,
-    powerLimit: null,
+    powerLimit: agreed(measured(allRows, COLUMN.powerLimit, GAUGE_SCALE)),
     meanSmActive: null,
-    peakSmActive: null,
+    maxMeanSmActive: null,
     peakFbUsed: null,
-    fbTotal: null,
+    fbTotal: agreed(measured(allRows, COLUMN.fbTotal, GAUGE_SCALE * 1024)),
     peakLink: null,
     minTempMargin: null,
     throttledShare: null,
@@ -149,6 +159,17 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
 
       const dram = measured(rows, COLUMN.dramActive, GAUGE_SCALE / 100)
       const occupancy = measured(rows, COLUMN.smOccupancy, GAUGE_SCALE / 100)
+      // The frame buffer is reported in mebibytes.
+      const frameBuffer = measured(rows, COLUMN.fbUsed, GAUGE_SCALE * 1024)
+      // The headroom of a GPU reads against its own frame buffer, so a rig of
+      // unequal cards keeps the fullest one in view.
+      const fbMarginGiB = min(
+        rows.flatMap((row) => {
+          const used = cell(row, COLUMN.fbUsed)
+          const total = cell(row, COLUMN.fbTotal)
+          return used === null || total === null ? [] : [(total - used) / (GAUGE_SCALE * 1024)]
+        }),
+      )
       const rx = scaled(max(measured(rows, COLUMN.pcieRx)), 1e-9)
       const tx = scaled(max(measured(rows, COLUMN.pcieTx)), 1e-9)
 
@@ -168,14 +189,15 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
         busiestSmOccupancy: max(occupancy),
         meanWatts: mean(measured(rows, COLUMN.powerMean, GAUGE_SCALE)),
         peakWatts: max(measured(rows, COLUMN.powerMax, GAUGE_SCALE)),
-        powerLimit: max(measured(rows, COLUMN.powerLimit, GAUGE_SCALE)),
         pcieTxRate: tx,
         pcieRxRate: rx,
         throttledPowerShare: worstShare(COLUMN.powerViolation),
         throttledThermalShare: worstShare(COLUMN.thermalViolation),
-        fbUsedGiB: scaled(max(measured(rows, COLUMN.fbUsed, GAUGE_SCALE)), 1 / 1024),
-        fbTotalGiB: scaled(max(measured(rows, COLUMN.fbTotal, GAUGE_SCALE)), 1 / 1024),
+        meanFbUsedGiB: mean(frameBuffer),
+        peakFbUsedGiB: max(frameBuffer),
+        fbMarginGiB,
         tempMargin: min(measured(rows, COLUMN.tempMargin, GAUGE_SCALE)),
+        gpuTemp: max(measured(rows, COLUMN.gpuTemp, GAUGE_SCALE)),
       }
       points.push(point)
 
@@ -188,12 +210,10 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
         wattsTotal += point.meanWatts * weight
         wattsWeight += weight
       }
-      summary.peakSmActive = higher(summary.peakSmActive, point.busiestSmActive)
+      summary.maxMeanSmActive = higher(summary.maxMeanSmActive, point.busiestSmActive)
       summary.peakWatts = higher(summary.peakWatts, point.peakWatts)
-      summary.powerLimit = higher(summary.powerLimit, point.powerLimit)
       summary.peakLink = higher(summary.peakLink, higher(rx, tx))
-      summary.peakFbUsed = higher(summary.peakFbUsed, point.fbUsedGiB)
-      summary.fbTotal = higher(summary.fbTotal, point.fbTotalGiB)
+      summary.peakFbUsed = higher(summary.peakFbUsed, point.peakFbUsedGiB)
       summary.minTempMargin = lower(summary.minTempMargin, point.tempMargin)
       const replays = measured(rows, COLUMN.pcieReplay)
       if (replays.length > 0) summary.pcieReplays = (summary.pcieReplays ?? 0) + sum(replays)

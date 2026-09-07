@@ -18,8 +18,9 @@ import (
 // tracedScraper holds one busy GPU read every 100ms from 0 to 900ms. Elapsed
 // cycles advance by 1000 per reading and active cycles by 800, so every
 // interval is 80 percent active. PCIe bytes advance by one million per
-// reading, power sits at 400W, and the reading at 500ms repeats the one at
-// 400ms, as a scrape that landed before the source refreshed does.
+// reading, power sits at 400W over 18000 MiB of frame buffer in use, and the
+// reading at 500ms repeats the one at 400ms, as a scrape that landed before
+// the source refreshed does.
 func tracedScraper() *Scraper {
 	s := NewScraper(nil, 100*time.Millisecond, time.Second)
 	device := "node=node0,gpu=0"
@@ -31,6 +32,7 @@ func tracedScraper() *Scraper {
 		s.kinds[metric] = KindCounter
 	}
 	s.kinds["DCGM_FI_DEV_POWER_USAGE"] = KindGauge
+	s.kinds["DCGM_FI_DEV_FB_USED"] = KindGauge
 
 	var elapsed, active, bytes float64
 	for i := 0; i < 10; i++ {
@@ -47,6 +49,7 @@ func tracedScraper() *Scraper {
 		add("DCGM_FI_PROF_SM_CYCLES_ACTIVE_TOTAL", active)
 		add("DCGM_FI_PROF_PCIE_RX_BYTES_TOTAL", bytes)
 		add("DCGM_FI_DEV_POWER_USAGE", 400)
+		add("DCGM_FI_DEV_FB_USED", 18000)
 	}
 	return s
 }
@@ -83,6 +86,7 @@ func TestTraceReportsOneRowPerRefreshInsideTheWindow(t *testing.T) {
 	assert.EqualValues(t, 8000, *cell(t, trace, 0, "DCGM_FI_PROF_SM_CYCLES_ACTIVE_TOTAL.share"))
 	assert.EqualValues(t, 1e7, *cell(t, trace, 0, "DCGM_FI_PROF_PCIE_RX_BYTES_TOTAL.rate"))
 	assert.EqualValues(t, 400*gaugeScale, *cell(t, trace, 0, "DCGM_FI_DEV_POWER_USAGE.value"))
+	assert.EqualValues(t, 18000*gaugeScale, *cell(t, trace, 0, "DCGM_FI_DEV_FB_USED.value"))
 
 	// The row at 600 follows the refresh at 400 across the repeated reading,
 	// so its rate spans 200ms rather than doubling.

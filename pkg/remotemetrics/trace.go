@@ -50,8 +50,10 @@ var traceColumns = map[string][]traceColumn{
 		{metric: "DCGM_FI_DEV_POWER_VIOLATION", stat: "rate"},
 		{metric: "DCGM_FI_DEV_THERMAL_VIOLATION", stat: "rate"},
 		{metric: "DCGM_FI_DEV_POWER_USAGE", stat: "value"},
+		{metric: "DCGM_FI_DEV_FB_USED", stat: "value"},
 		{metric: "DCGM_FI_PROF_SM_OCCUPANCY", stat: "value"},
 		{metric: "DCGM_FI_PROF_DRAM_ACTIVE", stat: "value"},
+		{metric: "DCGM_FI_DEV_GPU_TEMP", stat: "value"},
 		{metric: "DCGM_FI_DEV_GPU_TEMP_MARGIN_CELSIUS", stat: "value"},
 	},
 	ExporterNode: {

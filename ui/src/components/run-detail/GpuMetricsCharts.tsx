@@ -41,6 +41,8 @@ export function useGpuMetricsSection({
 
   const chartOptions = useMemo(() => {
     const percent = (v: number) => `${v.toFixed(1)}%`
+    const gibibytes = (v: number) => `${v.toFixed(1)} GiB`
+    const celsius = (v: number) => `${v.toFixed(0)} °C`
     const ratio = (mean: Series<GpuDataPoint>, busiest: (point: GpuDataPoint) => number | null) =>
       makeOption([mean, { name: 'Busiest GPU', color: BUSIEST_COLOR, value: busiest }], percent, undefined, PERCENT_FLOOR)
 
@@ -53,6 +55,17 @@ export function useGpuMetricsSection({
         (v) => `${v.toFixed(0)} W`,
         summary.powerLimit === null ? undefined : { value: summary.powerLimit, label: 'cap' },
       ),
+      fbOption: makeOption(
+        [
+          { name: 'Mean per GPU', color: '#f59e0b', value: (p) => p.meanFbUsedGiB },
+          { name: 'Peak of any GPU', color: '#dc2626', value: (p) => p.peakFbUsedGiB },
+        ],
+        gibibytes,
+        summary.fbTotal === null ? undefined : { value: summary.fbTotal, label: 'total', wholeScale: true },
+      ),
+      // No limit, so the axis keeps zero and the distance left to a full
+      // frame buffer reads off it.
+      fbMarginOption: makeOption([{ name: 'Frame Buffer Margin', color: '#ef4444', value: (p) => p.fbMarginGiB }], gibibytes),
       smActiveOption: ratio({ name: 'Mean per GPU', color: '#22c55e', value: (p) => p.smActive }, (p) => p.busiestSmActive),
       intOption: ratio({ name: 'Mean per GPU', color: '#8b5cf6', value: (p) => p.intActive }, (p) => p.busiestIntActive),
       occupancyOption: ratio({ name: 'Mean per GPU', color: '#0ea5e9', value: (p) => p.smOccupancy }, (p) => p.busiestSmOccupancy),
@@ -73,7 +86,10 @@ export function useGpuMetricsSection({
         undefined,
         PERCENT_FLOOR,
       ),
-      tempOption: makeOption([{ name: 'Temp Margin', color: '#ef4444', value: (p) => p.tempMargin }], (v) => `${v.toFixed(0)} °C`),
+      tempOption: makeOption(
+        [{ name: 'Temp Margin', color: '#ef4444', value: (p) => p.tempMargin, detail: (p) => (p.gpuTemp === null ? null : `GPU at ${celsius(p.gpuTemp)}`) }],
+        celsius,
+      ),
     }
   }, [makeOption, summary])
 
@@ -93,10 +109,10 @@ export function useGpuMetricsSection({
     cards: (
       <>
         <StatCard label="Mean SM Active" value={`${figure(summary.meanSmActive, 1)}%`} />
-        <StatCard label="Peak SM Active" value={`${figure(summary.peakSmActive, 1)}%`} />
+        <StatCard label="Max Mean SM Active" value={`${figure(summary.maxMeanSmActive, 1)}%`} />
         {hasPower && <StatCard label="Mean GPU Power" value={`${figure(summary.meanWatts, 0)} W`} />}
-        {hasPower && <StatCard label="Peak GPU Power" value={`${figure(summary.peakWatts, 0)} / ${figure(summary.powerLimit, 0)} W`} />}
-        <StatCard label="Peak Frame Buffer" value={`${figure(summary.peakFbUsed, 1)} / ${figure(summary.fbTotal, 1)} GiB`} />
+        {summary.powerLimit !== null && <StatCard label="Peak GPU Power" value={`${figure(summary.peakWatts, 0)} / ${figure(summary.powerLimit, 0)} W`} />}
+        {summary.fbTotal !== null && <StatCard label="Peak Frame Buffer" value={`${figure(summary.peakFbUsed, 1)} / ${figure(summary.fbTotal, 1)} GiB`} />}
         {hasPcieRate && <StatCard label="Peak PCIe Rate" value={`${figure(summary.peakLink, 2)} GB/s`} />}
         {hasDuration && <StatCard label="Mean Throttled Time" value={`${figure(summary.throttledShare, 1)}%`} />}
         <StatCard label="Min Temp Margin" value={`${figure(summary.minTempMargin, 0)} °C`} />
@@ -110,6 +126,8 @@ export function useGpuMetricsSection({
         {chart('Integer Pipe Active %', chartOptions.intOption)}
         {chart('SM Occupancy %', chartOptions.occupancyOption)}
         {chart('DRAM Active %', chartOptions.dramOption)}
+        {chart('Frame Buffer Used (GiB)', chartOptions.fbOption)}
+        {chart('Min Frame Buffer Margin (GiB)', chartOptions.fbMarginOption)}
         {hasPcieRate && chart('Peak PCIe Rate (GB/s)', chartOptions.pcieOption)}
         {hasDuration && chart('Throttled Time %, Worst GPU', chartOptions.throttleOption)}
         {chart('Min Temp Margin (°C)', chartOptions.tempOption)}

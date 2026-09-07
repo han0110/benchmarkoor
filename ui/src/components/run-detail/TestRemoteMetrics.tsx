@@ -3,7 +3,7 @@ import { useDeviceMetrics, useNodeMetrics } from '@/api/hooks/useRemoteMetrics'
 import { useTestRemoteMetrics } from '@/api/hooks/useTestRemoteMetrics'
 import { cpuCoreCounts, cpuUsageFigure } from '@/utils/nodeMetrics'
 import { higher, max } from '@/utils/remoteMetrics'
-import { reduceBlockMetrics, reduceGpuTraces, reduceNodeTraces, tracePeak, type TraceSeries } from '@/utils/testMetrics'
+import { frameBufferTotals, reduceBlockMetrics, reduceGpuTraces, reduceNodeTraces, tracePeak, type TraceSeries } from '@/utils/testMetrics'
 import { ChartSection, RemoteMetricsPanel, StatCard } from './RemoteMetricsPanel'
 import { PERCENT_FLOOR, figure, useDarkMode, useTraceOptionBuilder, type Reference } from './remoteMetricsChart'
 
@@ -12,6 +12,7 @@ type TraceChart = [title: string, series: TraceSeries[] | undefined, format: (v:
 
 const percent = (v: number) => `${v.toFixed(1)}%`
 const gigabytesPerSecond = (v: number) => `${v.toFixed(2)} GB/s`
+const gibibytes = (v: number) => `${v.toFixed(1)} GiB`
 
 /** The exporter every trace of a section came from, named in the header. */
 const SOURCE = {
@@ -49,19 +50,23 @@ export function TestRemoteMetrics({ runId, testName }: TestRemoteMetricsProps) {
 
   // The trace carries the busy share of each whole machine. The core counts
   // that turn it into the scale of the run charts ride on the run artifact.
-  const cpuCores = useMemo(() => (nodeMetrics ? cpuCoreCounts(nodeMetrics, testName) : {}), [nodeMetrics, testName])
+  const cpuCores = useMemo(() => (nodeMetrics ? cpuCoreCounts(nodeMetrics) : {}), [nodeMetrics])
   // The axis tops out at the largest node, as the run chart does.
   const cpuScale = max(Object.values(cpuCores))
 
   // The run artifacts hold the rows of this test, so every card of the block
   // reads as the block's slice of its run card.
   const block = useMemo(() => reduceBlockMetrics(deviceMetrics, nodeMetrics, testName), [deviceMetrics, nodeMetrics, testName])
+  // The trace holds no frame buffer total, so the limit of the used chart and
+  // the headroom of each device come from the run artifact.
+  const fbTotal = block.gpu?.fbTotal ?? null
+  const fbTotals = useMemo(() => (deviceMetrics ? frameBufferTotals(deviceMetrics, testName) : {}), [deviceMetrics, testName])
 
   const gpu = useMemo(() => {
     const exporter = data?.exporters['dcgm-exporter']
 
-    return exporter && reduceGpuTraces(exporter)
-  }, [data])
+    return exporter && reduceGpuTraces(exporter, fbTotals)
+  }, [data, fbTotals])
   const node = useMemo(() => {
     const exporter = data?.exporters['node-exporter']
 
@@ -76,14 +81,18 @@ export function TestRemoteMetrics({ runId, testName }: TestRemoteMetricsProps) {
       ['Integer Pipe Active %', gpu.intActive, percent, PERCENT_FLOOR],
       ['SM Occupancy %', gpu.smOccupancy, percent, PERCENT_FLOOR],
       ['DRAM Active %', gpu.dramActive, percent, PERCENT_FLOOR],
+      ['Frame Buffer Used (GiB)', gpu.fbUsedGiB, gibibytes, undefined, fbTotal === null ? undefined : { value: fbTotal, label: 'total', wholeScale: true }],
+      // No limit, so the axis keeps zero and the distance left to a full
+      // frame buffer reads off it.
+      ['Frame Buffer Margin (GiB)', gpu.fbMarginGiB, gibibytes],
       ['PCIe RX (GB/s)', gpu.pcieRx, gigabytesPerSecond],
       ['PCIe TX (GB/s)', gpu.pcieTx, gigabytesPerSecond],
       ['Throttled Time %', gpu.throttled, percent, PERCENT_FLOOR],
       ['Temp Margin (°C)', gpu.tempMargin, (v) => `${v.toFixed(0)} °C`],
     ]
 
-    return charts.flatMap(([title, series, format, floor]) => (series ? [{ title, option: makeOption(series, format, floor) }] : []))
-  }, [gpu, makeOption])
+    return charts.flatMap(([title, series, format, floor, limit]) => (series ? [{ title, option: makeOption(series, format, floor, limit) }] : []))
+  }, [gpu, fbTotal, makeOption])
 
   const nodeCharts = useMemo(() => {
     if (!node) return []
@@ -97,7 +106,7 @@ export function TestRemoteMetrics({ runId, testName }: TestRemoteMetricsProps) {
         PERCENT_FLOOR,
         cpuScale === null ? undefined : { value: cpuScale * 100, label: `(${cpuScale} processors)`, wholeScale: true },
       ],
-      ['RAM Used (GiB)', node.ramUsedGiB, (v) => `${v.toFixed(1)} GiB`],
+      ['RAM Used (GiB)', node.ramUsedGiB, gibibytes],
     ]
 
     return charts.flatMap(([title, series, format, floor, limit]) => (series ? [{ title, option: makeOption(series, format, floor, limit) }] : []))
@@ -126,9 +135,9 @@ export function TestRemoteMetrics({ runId, testName }: TestRemoteMetricsProps) {
           <StatCard label="Window" value={`${figure(windowSeconds, 1)} s, ${figure(scrapes, 0)} scrapes`} />
           {block.node && (
             <>
-              <StatCard label="Mean CPU Usage" value={cpuUsageFigure(block.node.meanCpuBusy, block.node.meanCpuCores)} />
+              <StatCard label="Mean CPU Usage" value={cpuUsageFigure(block.node.meanCpuBusy, block.node.cpuCores)} />
               <StatCard label="Peak CPU Usage" value={cpuUsageFigure(peakCpuBusy?.value ?? null, peakCpuBusy ? cpuCores[peakCpuBusy.name] : null)} />
-              <StatCard label="Peak RAM Used" value={`${figure(block.node.peakRamUsed, 1)} / ${figure(block.node.ramTotal, 1)} GiB`} />
+              {block.node.ramTotal !== null && <StatCard label="Peak RAM Used" value={`${figure(block.node.peakRamUsed, 1)} / ${block.node.ramTotal} GiB`} />}
             </>
           )}
           {block.gpu && (
@@ -136,8 +145,8 @@ export function TestRemoteMetrics({ runId, testName }: TestRemoteMetricsProps) {
               <StatCard label="Mean SM Active" value={`${figure(block.gpu.meanSmActive, 1)}%`} />
               <StatCard label="Peak SM Active" value={`${figure(peakSmActive?.value ?? null, 1)}%`} />
               {block.hasPower && <StatCard label="Mean GPU Power" value={`${figure(block.gpu.meanWatts, 0)} W`} />}
-              {block.hasPower && <StatCard label="Peak GPU Power" value={`${figure(block.gpu.peakWatts, 0)} / ${figure(block.gpu.powerLimit, 0)} W`} />}
-              <StatCard label="Peak Frame Buffer" value={`${figure(block.gpu.peakFbUsed, 1)} / ${figure(block.gpu.fbTotal, 1)} GiB`} />
+              {block.gpu.powerLimit !== null && <StatCard label="Peak GPU Power" value={`${figure(block.gpu.peakWatts, 0)} / ${figure(block.gpu.powerLimit, 0)} W`} />}
+              {block.gpu.fbTotal !== null && <StatCard label="Peak Frame Buffer" value={`${figure(block.gpu.peakFbUsed, 1)} / ${figure(block.gpu.fbTotal, 1)} GiB`} />}
               {block.hasPcieRate && <StatCard label="Peak PCIe Rate" value={`${figure(block.gpu.peakLink, 2)} GB/s`} />}
               {block.hasDuration && <StatCard label="Mean Throttled Time" value={`${figure(block.gpu.throttledShare, 1)}%`} />}
               <StatCard label="Min Temp Margin" value={`${figure(block.gpu.minTempMargin, 0)} °C`} />

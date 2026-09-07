@@ -1,7 +1,7 @@
 import type { DeviceMetricDevice, DeviceMetrics, TestRemoteMetricsExporter } from '@/api/types'
-import { reduceGpuMetrics, type GpuSummary } from './gpuMetrics'
+import { COLUMN, reduceGpuMetrics, type GpuSummary } from './gpuMetrics'
 import { reduceNodeMetrics, type NodeSummary } from './nodeMetrics'
-import { GAUGE_SCALE, NO_METRICS, host, max, mean } from './remoteMetrics'
+import { GAUGE_SCALE, LEADING, NO_METRICS, columnReader, host, max, mean } from './remoteMetrics'
 
 /** The instant column that leads every row, in milliseconds after the proving window started. */
 const AT_MS = 'at_ms'
@@ -18,8 +18,10 @@ export const TRACE_COLUMN = {
   powerViolation: 'DCGM_FI_DEV_POWER_VIOLATION.rate',
   thermalViolation: 'DCGM_FI_DEV_THERMAL_VIOLATION.rate',
   power: 'DCGM_FI_DEV_POWER_USAGE.value',
+  fbUsed: 'DCGM_FI_DEV_FB_USED.value',
   smOccupancy: 'DCGM_FI_PROF_SM_OCCUPANCY.value',
   dramActive: 'DCGM_FI_PROF_DRAM_ACTIVE.value',
+  gpuTemp: 'DCGM_FI_DEV_GPU_TEMP.value',
   tempMargin: 'DCGM_FI_DEV_GPU_TEMP_MARGIN_CELSIUS.value',
 } as const
 
@@ -37,6 +39,8 @@ export interface TraceSeries {
   name: string
   color: string
   data: Array<[number, number | null]>
+  /** A note the tooltip appends to each point, which names a reading the chart does not plot. */
+  detail?: Array<string | null>
 }
 
 export interface TraceSummary {
@@ -51,6 +55,8 @@ export interface TraceSummary {
 export interface GpuTraces {
   summary: TraceSummary
   power?: TraceSeries[]
+  fbUsedGiB?: TraceSeries[]
+  fbMarginGiB?: TraceSeries[]
   smActive?: TraceSeries[]
   intActive?: TraceSeries[]
   smOccupancy?: TraceSeries[]
@@ -69,6 +75,9 @@ export interface NodeTraces {
 
 /** Four hues far apart on the wheel, one per node in the order of the sorted node labels. */
 export const NODE_HUES = [217, 25, 142, 271]
+
+/** The label the GPU traces name a series after. */
+const gpuLabel = (device: DeviceMetricDevice) => `${host(device)} gpu${device.labels.gpu}`
 
 /**
  * deviceColors gives the devices of a node one hue and spreads them over a
@@ -143,14 +152,43 @@ function traceReader(exporter: TestRemoteMetricsExporter, name: (device: DeviceM
 // refreshes, so it is capped where the collector caps it too.
 const percent = (share: number) => Math.min(share / GAUGE_SCALE, 1) * 100
 const gauge = (value: number) => value / GAUGE_SCALE
+// The frame buffer is reported in mebibytes.
+const gibibytes = (value: number) => gauge(value) / 1024
 const gigabytesPerSecond = (rate: number) => rate / 1e9
 
-export function reduceGpuTraces(exporter: TestRemoteMetricsExporter): GpuTraces {
-  const { trace, summary } = traceReader(exporter, (device) => `${host(device)} gpu${device.labels.gpu}`)
+/**
+ * annotate hands the tooltip of one trace the readings of another, so a chart
+ * can name a figure it does not plot. Both traces rest on the same rows, so
+ * their points line up. A file without the second column leaves the tooltip
+ * as it is.
+ */
+function annotate(series: TraceSeries[] | undefined, notes: TraceSeries[] | undefined, format: (value: number) => string) {
+  if (series === undefined || notes === undefined) return series
+
+  return series.map((one, device) => ({ ...one, detail: notes[device].data.map(([, value]) => (value === null ? null : format(value))) }))
+}
+
+/**
+ * reduceGpuTraces reads the GPU trace of one block. The frame buffer total of
+ * each device rides on the run artifact, which the trace has no column for, so
+ * it comes keyed by the device label and a device without one charts the
+ * readings and not the headroom.
+ */
+export function reduceGpuTraces(exporter: TestRemoteMetricsExporter, fbTotalGiB: Record<string, number> = {}): GpuTraces {
+  const { trace, summary } = traceReader(exporter, gpuLabel)
+  // The headroom of a GPU reads against its own frame buffer, so a rig of
+  // unequal cards keeps the fullest one in view.
+  const fbMarginGiB = trace([TRACE_COLUMN.fbUsed], gibibytes)?.flatMap((series) => {
+    const total = fbTotalGiB[series.name]
+
+    return total === undefined ? [] : [{ ...series, data: series.data.map(([at, used]): [number, number | null] => [at, used === null ? null : total - used]) }]
+  })
 
   return {
     summary,
     power: trace([TRACE_COLUMN.power], gauge),
+    fbUsedGiB: trace([TRACE_COLUMN.fbUsed], gibibytes),
+    fbMarginGiB: fbMarginGiB === undefined || fbMarginGiB.length === 0 ? undefined : fbMarginGiB,
     smActive: trace([TRACE_COLUMN.smActive], percent),
     intActive: trace([TRACE_COLUMN.intActive], percent),
     smOccupancy: trace([TRACE_COLUMN.smOccupancy], percent),
@@ -161,7 +199,9 @@ export function reduceGpuTraces(exporter: TestRemoteMetricsExporter): GpuTraces 
     // nanoseconds per second rates measures the share. A refresh can land
     // inside a shorter observed span, so the share is capped like the others.
     throttled: trace([TRACE_COLUMN.powerViolation, TRACE_COLUMN.thermalViolation], (power, thermal) => Math.min(Math.max(power, thermal) / 1e9, 1) * 100),
-    tempMargin: trace([TRACE_COLUMN.tempMargin], gauge),
+    // A margin reads against the temperature the same sample measured, which
+    // the tooltip names and no chart plots.
+    tempMargin: annotate(trace([TRACE_COLUMN.tempMargin], gauge), trace([TRACE_COLUMN.gpuTemp], gauge), (temperature) => `at ${temperature.toFixed(0)} °C`),
   }
 }
 
@@ -229,4 +269,28 @@ export function reduceBlockMetrics(
     hasPcieRate: gpu.hasPcieRate,
     hasDuration: gpu.hasDuration,
   }
+}
+
+/**
+ * frameBufferTotals reads the frame buffer total of each GPU of one block, in
+ * GiB, keyed by the label the per test traces name their series after. A
+ * device is absent when the artifact does not carry the block, or when its
+ * row lacks the total.
+ */
+export function frameBufferTotals(metrics: DeviceMetrics, testName: string): Record<string, number> {
+  const { cell } = columnReader(metrics)
+  const totals: Record<string, number> = {}
+
+  for (const rows of Object.values(metrics.tests[testName] ?? {})) {
+    for (const row of rows) {
+      const device = cell(row, LEADING.device)
+      const total = cell(row, COLUMN.fbTotal)
+      if (device === null || total === null) continue
+
+      // The frame buffer is reported in mebibytes.
+      totals[gpuLabel(metrics.devices[device])] = total / (GAUGE_SCALE * 1024)
+    }
+  }
+
+  return totals
 }

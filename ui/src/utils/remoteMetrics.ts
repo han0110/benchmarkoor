@@ -92,6 +92,8 @@ export const higher = (current: number | null, value: number | null) =>
   value === null ? current : current === null ? value : Math.max(current, value)
 export const lower = (current: number | null, value: number | null) =>
   value === null ? current : current === null ? value : Math.min(current, value)
+/** The one value every device reported, which is a capacity the whole rig reads against, or null when they differ. */
+export const agreed = (values: number[]) => (values.length > 0 && values.every((value) => value === values[0]) ? values[0] : null)
 
 /**
  * ratioPerDevice reads a counter against the reference counter of the same

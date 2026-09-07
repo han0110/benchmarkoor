@@ -79,9 +79,9 @@ export function useNodeMetricsSection({
     },
     cards: (
       <>
-        <StatCard label="Mean CPU Usage" value={cpuUsageFigure(summary.meanCpuBusy, summary.meanCpuCores)} />
-        <StatCard label="Peak CPU Usage" value={cpuUsageFigure(summary.peakCpuBusy, summary.peakCpuCores)} />
-        <StatCard label="Peak RAM Used" value={`${figure(summary.peakRamUsed, 1)} / ${figure(summary.ramTotal, 1)} GiB`} />
+        <StatCard label="Mean CPU Usage" value={cpuUsageFigure(summary.meanCpuBusy, summary.cpuCores)} />
+        <StatCard label="Max Mean CPU Usage" value={cpuUsageFigure(summary.maxMeanCpuBusy, summary.cpuCores)} />
+        {summary.ramTotal !== null && <StatCard label="Peak RAM Used" value={`${figure(summary.peakRamUsed, 1)} / ${summary.ramTotal} GiB`} />}
       </>
     ),
     charts: (

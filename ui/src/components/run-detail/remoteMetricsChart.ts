@@ -55,6 +55,8 @@ export interface Series<P> {
   name: string
   color: string
   value: (point: P) => number | null
+  /** A note the tooltip appends after the value, which names a reading the chart does not plot. */
+  detail?: (point: P) => string | null
 }
 
 /** A dashed line marking a hardware limit, so the gap below it reads as headroom. */
@@ -206,6 +208,9 @@ function referenceLine(limit: Reference, format: (v: number) => string, color: s
   }
 }
 
+/** A tooltip note, which follows the value of its series in brackets. */
+const note = (text: string | null | undefined) => (text ? ` (${text})` : '')
+
 /** A percent axis floor, which keeps an idle chart from zooming into noise. */
 const floorMax = (floor?: number) => ({
   max: floor === undefined ? undefined : (extent: { max: number }) => (extent.max < floor ? floor : undefined),
@@ -274,7 +279,7 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
             return [
               `<strong>Test #${point.testNumber}</strong>`,
               formatTestNameLong(point.testName, nameMode),
-              ...series.map((s) => `${s.name}: <strong>${show(s.value(point))}</strong>`),
+              ...series.map((s) => `${s.name}: <strong>${show(s.value(point))}</strong>${note(s.detail?.(point))}`),
               describe(point),
             ].join('<br/>')
           },
@@ -321,6 +326,7 @@ export function useTraceOptionBuilder({ isDark, zoomRange }: { isDark: boolean; 
       const show = (value: number | null) => (value === null ? 'n/a' : format(value))
       const isLargeDataset = series.reduce((total, s) => total + s.data.length, 0) > 100
       const reference = limit === undefined ? undefined : referenceLine(limit, format, mutedColor)
+      const details = new Map(series.map((s) => [s.name, s.detail]))
 
       return {
         ...base,
@@ -334,12 +340,12 @@ export function useTraceOptionBuilder({ isDark, zoomRange }: { isDark: boolean; 
         },
         tooltip: {
           ...tooltipStyle,
-          formatter: (params: Array<{ seriesName: string; marker: string; value: [number, number | null] }>) =>
+          formatter: (params: Array<{ seriesName: string; marker: string; dataIndex: number; value: [number, number | null] }>) =>
             params.length === 0
               ? ''
               : [
                   `<strong>${seconds(params[0].value[0])}</strong>`,
-                  ...params.map((p) => `${p.marker}${p.seriesName}: <strong>${show(p.value[1])}</strong>`),
+                  ...params.map((p) => `${p.marker}${p.seriesName}: <strong>${show(p.value[1])}</strong>${note(details.get(p.seriesName)?.[p.dataIndex])}`),
                 ].join('<br/>'),
         },
         xAxis: { ...xAxisStyle(seconds), min: 0, max: 'dataMax' as const },

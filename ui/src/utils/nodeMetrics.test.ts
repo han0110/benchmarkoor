@@ -76,40 +76,17 @@ describe('reduceNodeMetrics', () => {
     expect(dataPoints[0].cpuBusy).toBeCloseTo(3200)
     expect(dataPoints[0].busiestCpuBusy).toBeCloseTo(6400)
     expect(summary.meanCpuBusy).toBeCloseTo(3200)
-    expect(summary.peakCpuBusy).toBeCloseTo(6400)
+    expect(summary.maxMeanCpuBusy).toBeCloseTo(6400)
     expect(summary.cpuCores).toBe(64)
   })
 
-  it('scales every node by the core count it counted', () => {
+  it('reads the share of each node when the nodes count different processors', () => {
     const { dataPoints, summary } = reduceNodeMetrics(unequal)
 
-    expect(dataPoints[0].cpuBusy).toBeCloseTo(6400)
-    expect(dataPoints[0].busiestCpuBusy).toBeCloseTo(12800)
-    expect(summary.cpuCores).toBe(128)
-  })
-
-  it('reads the mean against one capacity only where every node counts the same processors', () => {
-    expect(reduceNodeMetrics(metrics).summary.meanCpuCores).toBe(64)
-    expect(reduceNodeMetrics(unequal).summary.meanCpuCores).toBeNull()
-  })
-
-  it('reads the peak against the processors of the node it came from', () => {
-    const busySmall: DeviceMetrics = {
-      ...metrics,
-      tests: {
-        'a.json': {
-          '0x1': [
-            rewrite(busy, { [NODE_COLUMN.cpuAll]: cpuSeconds(8, 2), [NODE_COLUMN.cpuBusy]: cpuSeconds(8, 2) }),
-            rewrite(idle, { [NODE_COLUMN.cpuAll]: cpuSeconds(128, 2) }),
-          ],
-        },
-      },
-    }
-    const { summary } = reduceNodeMetrics(busySmall)
-
-    expect(summary.peakCpuBusy).toBeCloseTo(800)
-    expect(summary.peakCpuCores).toBe(8)
-    expect(summary.cpuCores).toBe(128)
+    expect(dataPoints[0].cpuBusy).toBeCloseTo(50)
+    expect(dataPoints[0].busiestCpuBusy).toBeCloseTo(100)
+    expect(summary.maxMeanCpuBusy).toBeCloseTo(100)
+    expect(summary.cpuCores).toBeNull()
   })
 
   it('reads the share of the whole node when the artifact has no duration', () => {
@@ -127,9 +104,15 @@ describe('reduceNodeMetrics', () => {
 
     expect(dataPoints[0].ramUsedGiB).toBeCloseTo(20)
     expect(dataPoints[0].peakRamUsedGiB).toBeCloseTo(40)
-    expect(dataPoints[0].ramTotalGiB).toBeCloseTo(128)
     expect(summary.peakRamUsed).toBeCloseTo(40)
     expect(summary.ramTotal).toBeCloseTo(128)
+  })
+
+  it('reads the RAM total to the GiB, only where every node carries the same', () => {
+    const total = (gib: number) => ({ ...metrics, tests: { 'a.json': { '0x1': [busy, rewrite(idle, { [NODE_COLUMN.memTotal]: gib * GIB * GAUGE_SCALE })] } } })
+
+    expect(reduceNodeMetrics(total(128.2)).summary.ramTotal).toBe(128)
+    expect(reduceNodeMetrics(total(256)).summary.ramTotal).toBeNull()
   })
 
   it('leaves a figure unmeasured when no node of the block carries it', () => {
@@ -159,10 +142,17 @@ describe('reduceNodeMetrics', () => {
 })
 
 describe('cpuCoreCounts', () => {
-  it('counts the processors of each node of one block', () => {
-    expect(cpuCoreCounts(metrics, 'a.json')).toEqual({ node1: 64, node2: 64 })
-    expect(cpuCoreCounts(unequal, 'a.json')).toEqual({ node1: 128, node2: 8 })
-    expect(cpuCoreCounts(metrics, 'b.json')).toEqual({})
+  it('counts the processors of each node, only where every node counts the same', () => {
+    expect(cpuCoreCounts(metrics)).toEqual({ node1: 64, node2: 64 })
+    expect(cpuCoreCounts(unequal)).toEqual({})
+  })
+
+  it('counts over every block, so one late scrape does not round a node off by one', () => {
+    const late = rewrite(busy, { [NODE_COLUMN.cpuAll]: cpuSeconds(63.4, 2), [NODE_COLUMN.cpuBusy]: cpuSeconds(63.4, 2) })
+    const twoBlocks = { ...metrics, tests: { 'a.json': { '0x1': [late, idle] }, 'b.json': { '0x2': [busy, idle] } } }
+
+    expect(cpuCoreCounts(twoBlocks)).toEqual({ node1: 64, node2: 64 })
+    expect(reduceNodeMetrics(twoBlocks).summary.cpuCores).toBe(64)
   })
 })
 

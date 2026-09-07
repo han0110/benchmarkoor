@@ -87,7 +87,8 @@ interface RemoteMetricsPanelProps {
   sources: Array<{ name: string; title: string }>
   cards: ReactNode
   charts: ReactNode
-  footer: string
+  /** Hint under the charts, left out where the charts explain themselves. */
+  footer?: string
   /** Drops the card surface, for a panel that sits inside another one. */
   embedded?: boolean
 }
@@ -118,7 +119,7 @@ export function RemoteMetricsPanel({ title, sources, cards, charts, footer, embe
       {/* Charts Grid */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">{charts}</div>
 
-      <p className="text-center text-xs/5 text-gray-500 dark:text-gray-400">{footer}</p>
+      {footer && <p className="text-center text-xs/5 text-gray-500 dark:text-gray-400">{footer}</p>}
     </div>
   )
 }

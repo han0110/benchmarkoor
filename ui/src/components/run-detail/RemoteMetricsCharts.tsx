@@ -57,7 +57,6 @@ export function RemoteMetricsCharts({ nodeMetrics, deviceMetrics, ...filters }: 
           {gpu?.charts}
         </>
       }
-      footer="Rig usage per block (ordered by execution) - mean series include idle devices - drag slider to zoom"
     />
   )
 }

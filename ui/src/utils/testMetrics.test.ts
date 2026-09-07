@@ -3,7 +3,7 @@ import type { DeviceMetrics, TestRemoteMetricsExporter } from '@/api/types'
 import { COLUMN } from './gpuMetrics'
 import { NODE_COLUMN } from './nodeMetrics'
 import { GAUGE_SCALE, mean } from './remoteMetrics'
-import { NODE_TRACE_COLUMN, TRACE_COLUMN, deviceColors, reduceBlockMetrics, reduceGpuTraces, reduceNodeTraces, tracePeak } from './testMetrics'
+import { NODE_TRACE_COLUMN, TRACE_COLUMN, deviceColors, frameBufferTotals, reduceBlockMetrics, reduceGpuTraces, reduceNodeTraces, tracePeak } from './testMetrics'
 
 const GIB = 1024 ** 3
 
@@ -31,8 +31,10 @@ const busy = row(gpuColumns, {
   [TRACE_COLUMN.powerViolation]: 250e6,
   [TRACE_COLUMN.thermalViolation]: 0,
   [TRACE_COLUMN.power]: 450 * GAUGE_SCALE,
+  [TRACE_COLUMN.fbUsed]: 30720 * GAUGE_SCALE,
   [TRACE_COLUMN.smOccupancy]: 0.3 * GAUGE_SCALE,
   [TRACE_COLUMN.dramActive]: 0.4 * GAUGE_SCALE,
+  [TRACE_COLUMN.gpuTemp]: 80 * GAUGE_SCALE,
   [TRACE_COLUMN.tempMargin]: 10 * GAUGE_SCALE,
 })
 const idle = row(gpuColumns, {
@@ -44,8 +46,10 @@ const idle = row(gpuColumns, {
   [TRACE_COLUMN.powerViolation]: 0,
   [TRACE_COLUMN.thermalViolation]: 0,
   [TRACE_COLUMN.power]: 20 * GAUGE_SCALE,
+  [TRACE_COLUMN.fbUsed]: 1024 * GAUGE_SCALE,
   [TRACE_COLUMN.smOccupancy]: 0,
   [TRACE_COLUMN.dramActive]: 0,
+  [TRACE_COLUMN.gpuTemp]: 50 * GAUGE_SCALE,
   [TRACE_COLUMN.tempMargin]: 40 * GAUGE_SCALE,
 })
 
@@ -61,6 +65,7 @@ describe('reduceGpuTraces', () => {
     const last = (series: ReturnType<typeof reduceGpuTraces>['power']) => series![1].data[1]
 
     expect(last(traces.power)).toEqual([1.5, 450])
+    expect(last(traces.fbUsedGiB)).toEqual([1.5, 30])
     expect(last(traces.smActive)).toEqual([1.5, 80])
     expect(last(traces.intActive)).toEqual([1.5, 40])
     expect(last(traces.smOccupancy)).toEqual([1.5, 30])
@@ -69,6 +74,32 @@ describe('reduceGpuTraces', () => {
     expect(last(traces.pcieTx)).toEqual([1.5, 1])
     expect(last(traces.throttled)).toEqual([1.5, 25])
     expect(last(traces.tempMargin)).toEqual([1.5, 10])
+  })
+
+  it('reads the frame buffer headroom of every GPU against its own capacity', () => {
+    const traces = reduceGpuTraces(gpuExporter, { 'node2 gpu3': 32 })
+
+    expect(traces.fbMarginGiB!.map((series) => series.name)).toEqual(['node2 gpu3'])
+    expect(traces.fbMarginGiB![0].data).toEqual([[0.5, null], [1.5, 2]])
+    expect(reduceGpuTraces(gpuExporter).fbMarginGiB).toBeUndefined()
+  })
+
+  it('names the temperature of the same sample on the margin tooltip', () => {
+    const traces = reduceGpuTraces(gpuExporter)
+
+    expect(traces.tempMargin![0].detail).toEqual(['at 50 °C'])
+    expect(traces.tempMargin![1].detail).toEqual([null, 'at 80 °C'])
+  })
+
+  it('leaves the margin tooltip alone when the file carries no temperature', () => {
+    const keep = gpuColumns.map((column, position) => [column, position] as const).filter(([column]) => column !== TRACE_COLUMN.gpuTemp)
+    const older: TestRemoteMetricsExporter = {
+      ...gpuExporter,
+      columns: keep.map(([column]) => column),
+      samples: gpuExporter.samples.map((rows) => rows.map((r) => keep.map(([, position]) => r[position]))),
+    }
+
+    expect(reduceGpuTraces(older).tempMargin![1].detail).toBeUndefined()
   })
 
   it('breaks the line where a cell has no base', () => {
@@ -114,7 +145,7 @@ describe('reduceGpuTraces', () => {
   })
 
   it('leaves out a chart over a column an older file never wrote', () => {
-    const dropped = new Set<string>([TRACE_COLUMN.thermalViolation, TRACE_COLUMN.tempMargin])
+    const dropped = new Set<string>([TRACE_COLUMN.thermalViolation, TRACE_COLUMN.tempMargin, TRACE_COLUMN.fbUsed])
     const keep = gpuColumns.map((column, position) => [column, position] as const).filter(([column]) => !dropped.has(column))
     const older: TestRemoteMetricsExporter = {
       ...gpuExporter,
@@ -125,6 +156,7 @@ describe('reduceGpuTraces', () => {
 
     expect(traces.throttled).toBeUndefined()
     expect(traces.tempMargin).toBeUndefined()
+    expect(traces.fbUsedGiB).toBeUndefined()
     expect(traces.smActive![1].data).toEqual([[0.5, null], [1.5, 80]])
   })
 })
@@ -331,6 +363,12 @@ describe('reduceBlockMetrics', () => {
     expect(block.gpu).toBeNull()
     expect(block.node).toBeNull()
     expect(block.hasPower).toBe(false)
+  })
+
+  it('reads the frame buffer total of every GPU of the block by its trace label', () => {
+    expect(frameBufferTotals(deviceMetrics, 'b.json')).toEqual({ 'node1 gpu0': 32, 'node1 gpu1': 32 })
+    expect(frameBufferTotals(deviceMetrics, 'a.json')).toEqual({ 'node1 gpu0': 32 })
+    expect(frameBufferTotals(deviceMetrics, 'c.json')).toEqual({})
   })
 })
 

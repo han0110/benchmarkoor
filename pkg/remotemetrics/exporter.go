@@ -40,6 +40,7 @@ var artifactColumns = map[string]map[string][]string{
 		"DCGM_FI_DEV_PCIE_REPLAY_COUNTER":      {"total"},
 		"DCGM_FI_PROF_DRAM_ACTIVE":             {"mean"},
 		"DCGM_FI_PROF_SM_OCCUPANCY":            {"mean"},
+		"DCGM_FI_DEV_GPU_TEMP":                 {"max"},
 		"DCGM_FI_DEV_GPU_TEMP_MARGIN_CELSIUS":  {"min"},
 		"DCGM_FI_DEV_FB_USED":                  {"max"},
 		"DCGM_FI_DEV_FB_TOTAL":                 {"max"},
