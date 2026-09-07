@@ -1,43 +1,30 @@
 import { Tab, TabGroup, TabList, TabPanel, TabPanels } from '@headlessui/react'
 import clsx from 'clsx'
-import { BarChart3, Database, BarChart2 } from 'lucide-react'
-import type { DashboardTab } from '../types'
 
-interface DashboardTabsProps {
-  activeTab: DashboardTab
-  onTabChange: (tab: DashboardTab) => void
+export interface DashboardTabOption<T extends string> {
+  value: T
+  label: string
+  icon: React.ReactNode
+}
+
+interface DashboardTabsProps<T extends string> {
+  tabs: DashboardTabOption<T>[]
+  activeTab: T
+  onTabChange: (tab: T) => void
   children: React.ReactNode
 }
 
-const TABS: { value: DashboardTab; label: string; icon: React.ReactNode }[] = [
-  {
-    value: 'overview',
-    label: 'Overview',
-    icon: <BarChart3 className="size-4" />,
-  },
-  {
-    value: 'cache',
-    label: 'Cache',
-    icon: <Database className="size-4" />,
-  },
-  {
-    value: 'distribution',
-    label: 'Distribution',
-    icon: <BarChart2 className="size-4" />,
-  },
-]
-
-export function DashboardTabs({ activeTab, onTabChange, children }: DashboardTabsProps) {
-  const tabIndex = Math.max(0, TABS.findIndex((t) => t.value === activeTab))
+export function DashboardTabs<T extends string>({ tabs, activeTab, onTabChange, children }: DashboardTabsProps<T>) {
+  const tabIndex = Math.max(0, tabs.findIndex((t) => t.value === activeTab))
 
   const handleTabChange = (index: number) => {
-    onTabChange(TABS[index].value)
+    onTabChange(tabs[index].value)
   }
 
   return (
     <TabGroup key={activeTab} selectedIndex={tabIndex} onChange={handleTabChange}>
       <TabList className="flex border-b border-gray-200 dark:border-gray-700">
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <Tab
             key={tab.value}
             className={({ selected }) =>

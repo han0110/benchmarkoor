@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
 import { FlaskConical } from 'lucide-react'
 import type { TestEntry, SuiteTest, AggregatedStats, StepResult } from '@/api/types'
@@ -9,7 +9,8 @@ import { TestName } from '@/components/shared/TestName'
 import { compileQuery, toggleSearchTerm } from '@/utils/eestNameFilter'
 import { type StepTypeOption, ALL_STEP_TYPES } from '@/pages/RunDetailPage'
 
-export type TestSortColumn = 'order' | 'name' | 'genesis' | 'time' | 'mgas' | 'passed' | 'failed'
+// A string names a column of the metric column set the caller supplies.
+export type TestSortColumn = 'order' | 'name' | 'genesis' | 'time' | 'mgas' | 'passed' | 'failed' | (string & {})
 export type TestSortDirection = 'asc' | 'desc'
 export type TestStatusFilter = 'all' | 'passed' | 'failed'
 
@@ -59,6 +60,17 @@ function getAggregatedStats(entry: TestEntry, stepFilter: StepTypeOption[] = ALL
     msg_count: 0,
     method_stats: { times: {}, mgas_s: {} },
   }
+}
+
+/** One metric column, supplied by the caller in place of the total time and the MGas/s of the table. */
+interface TestColumn {
+  key: string
+  label: string
+  className?: string
+  /** Cell hint, naming what the figure rests on. */
+  title?: string
+  value: (testName: string, statsFiltered: AggregatedStats | undefined) => number | undefined
+  format: (value: number) => ReactNode
 }
 
 interface TestsTableProps {
@@ -128,6 +140,30 @@ function calculateMGasPerSec(gasUsedTotal: number, gasUsedTimeTotal: number): nu
   return (gasUsedTotal * 1000) / gasUsedTimeTotal
 }
 
+/** The columns the table prints beside the fixed ones. */
+function defaultColumns(stepFilter: StepTypeOption[]): TestColumn[] {
+  const title = `Based on steps: ${stepFilter.join(', ')}`
+  return [
+    {
+      key: 'time',
+      label: 'Total Time',
+      className: 'w-28 text-right',
+      title,
+      value: (_testName, statsFiltered) => statsFiltered?.time_total,
+      format: (value) => <Duration nanoseconds={value} />,
+    },
+    {
+      key: 'mgas',
+      label: 'MGas/s',
+      className: 'w-24 text-right',
+      title,
+      value: (_testName, statsFiltered) =>
+        statsFiltered && calculateMGasPerSec(statsFiltered.gas_used_total, statsFiltered.gas_used_time_total),
+      format: (value) => value.toFixed(2),
+    },
+  ]
+}
+
 export function TestsTable({
   tests,
   suiteTests,
@@ -145,6 +181,8 @@ export function TestsTable({
   onStatusFilterChange,
   onTestClick,
 }: TestsTableProps) {
+  const columns = useMemo(() => defaultColumns(stepFilter), [stepFilter])
+
   const executionOrder = useMemo(() => {
     if (!suiteTests) return new Map<string, number>()
     return new Map(suiteTests.map((test, index) => [test.name, index + 1]))
@@ -200,6 +238,8 @@ export function TestsTable({
       })
     }
 
+    const column = columns.find((candidate) => candidate.key === sortBy)
+
     return filtered.sort(([a, entryA], [b, entryB]) => {
       let comparison = 0
       // Use stepFilter for time/mgas, ALL_STEP_TYPES for passed/failed
@@ -227,12 +267,20 @@ export function TestsTable({
         comparison = (statsAll_A?.success ?? 0) - (statsAll_B?.success ?? 0)
       } else if (sortBy === 'failed') {
         comparison = (statsAll_A?.fail ?? 0) - (statsAll_B?.fail ?? 0)
+      } else if (column) {
+        const valueA = column.value(a, statsFiltered_A)
+        const valueB = column.value(b, statsFiltered_B)
+        // A test the column holds no figure for sorts after every test it does.
+        comparison =
+          valueA === undefined || valueB === undefined
+            ? (Number(valueA === undefined) - Number(valueB === undefined)) * (sortDir === 'asc' ? 1 : -1)
+            : valueA - valueB
       } else {
         comparison = a.localeCompare(b)
       }
       return sortDir === 'asc' ? comparison : -comparison
     })
-  }, [tests, searchQuery, statusFilter, genesisFilter, stepFilter, executionOrder, genesisMap, sortBy, sortDir])
+  }, [tests, searchQuery, statusFilter, genesisFilter, stepFilter, executionOrder, genesisMap, sortBy, sortDir, columns])
 
   const totalPages = Math.ceil(sortedTests.length / pageSize)
   const paginatedTests = sortedTests.slice((currentPage - 1) * pageSize, currentPage * pageSize)
@@ -323,8 +371,17 @@ export function TestsTable({
               {hasGenesis && (
                 <SortableHeader label="Genesis" column="genesis" currentSort={sortBy} currentDirection={sortDir} onSort={handleSort} className="w-40" />
               )}
-              <SortableHeader label="Total Time" column="time" currentSort={sortBy} currentDirection={sortDir} onSort={handleSort} className="w-28 text-right" />
-              <SortableHeader label="MGas/s" column="mgas" currentSort={sortBy} currentDirection={sortDir} onSort={handleSort} className="w-24 text-right" />
+              {columns.map((column) => (
+                <SortableHeader
+                  key={column.key}
+                  label={column.label}
+                  column={column.key}
+                  currentSort={sortBy}
+                  currentDirection={sortDir}
+                  onSort={handleSort}
+                  className={column.className}
+                />
+              ))}
               <SortableHeader label="Failed" column="failed" currentSort={sortBy} currentDirection={sortDir} onSort={handleSort} className="w-16 text-center" />
               <SortableHeader label="Passed" column="passed" currentSort={sortBy} currentDirection={sortDir} onSort={handleSort} className="w-16 text-center" />
             </tr>
@@ -366,22 +423,18 @@ export function TestsTable({
                       {genesisMap.get(testName) ?? '—'}
                     </td>
                   )}
-                  <td
-                    className="whitespace-nowrap px-4 py-3 text-right text-sm/6 text-gray-500 dark:text-gray-400"
-                    title={`Based on steps: ${stepFilter.join(', ')}`}
-                  >
-                    {statsFiltered ? <Duration nanoseconds={statsFiltered.time_total} /> : '-'}
-                  </td>
-                  <td
-                    className="whitespace-nowrap px-4 py-3 text-right text-sm/6 text-gray-500 dark:text-gray-400"
-                    title={`Based on steps: ${stepFilter.join(', ')}`}
-                  >
-                    {(() => {
-                      if (!statsFiltered) return '-'
-                      const mgas = calculateMGasPerSec(statsFiltered.gas_used_total, statsFiltered.gas_used_time_total)
-                      return mgas !== undefined ? mgas.toFixed(2) : '-'
-                    })()}
-                  </td>
+                  {columns.map((column) => {
+                    const value = column.value(testName, statsFiltered)
+                    return (
+                      <td
+                        key={column.key}
+                        className={clsx('whitespace-nowrap px-4 py-3 text-sm/6 text-gray-500 dark:text-gray-400', column.className)}
+                        title={column.title}
+                      >
+                        {value === undefined ? '-' : column.format(value)}
+                      </td>
+                    )
+                  })}
                   <td className="whitespace-nowrap px-4 py-3 text-center">
                     {statsAll && statsAll.fail > 0 && <Badge variant="error">{statsAll.fail}</Badge>}
                   </td>

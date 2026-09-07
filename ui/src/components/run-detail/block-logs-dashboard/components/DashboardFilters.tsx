@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { DashboardState, DashboardStats, TestCategory } from '../types'
 import { ALL_CATEGORIES, CATEGORY_COLORS } from '../utils/colors'
+import { emptyCategoryBreakdown } from '../utils/statistics'
 
 interface DashboardFiltersProps {
   state: DashboardState
@@ -31,7 +32,16 @@ const CATEGORY_OPTIONS: { value: TestCategory; label: string }[] = [
   { value: 'other', label: 'Other' },
 ]
 
-export function DashboardFilters({ state, stats, onUpdate }: DashboardFiltersProps) {
+interface CategoryFilterProps {
+  /** The selected categories, empty for all of them. */
+  categories: TestCategory[]
+  /** Tests per category, which the menu lists beside each one and hides where none. */
+  breakdown: Record<TestCategory, number>
+  onChange: (categories: TestCategory[]) => void
+}
+
+/** The category menu of a dashboard filter bar. */
+export function CategoryFilter({ categories, breakdown, onChange }: CategoryFilterProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -47,54 +57,54 @@ export function DashboardFilters({ state, stats, onUpdate }: DashboardFiltersPro
   }, [])
 
   const toggleCategory = (category: TestCategory) => {
-    const currentCategories = state.categories
+    const currentCategories = categories
     const validCategories = currentCategories.filter((c) => ALL_CATEGORIES.includes(c as TestCategory))
 
     if (currentCategories.length === 0) {
       // Currently "all" selected, switching to exclude one category
-      onUpdate({ categories: ALL_CATEGORIES.filter((c) => c !== category) })
+      onChange(ALL_CATEGORIES.filter((c) => c !== category))
     } else if (validCategories.length === 0) {
       // Currently "none" selected, start fresh with just this category
-      onUpdate({ categories: [category] })
+      onChange([category])
     } else if (currentCategories.includes(category)) {
       // Remove from selection
       const newCategories = currentCategories.filter((c) => c !== category)
       if (newCategories.length === 0) {
         // All categories unchecked, switch to "none" mode
-        onUpdate({ categories: ['__none__' as TestCategory] })
+        onChange(['__none__' as TestCategory])
       } else {
-        onUpdate({ categories: newCategories })
+        onChange(newCategories)
       }
     } else {
       // Add to selection
       const newCategories = [...validCategories, category]
       // If all categories are now selected, switch back to empty (meaning "all")
       if (newCategories.length === ALL_CATEGORIES.length) {
-        onUpdate({ categories: [] })
+        onChange([])
       } else {
-        onUpdate({ categories: newCategories })
+        onChange(newCategories)
       }
     }
   }
 
   const selectAll = () => {
-    onUpdate({ categories: [] })
+    onChange([])
   }
 
   const selectNone = () => {
     // Set to a single fake category that won't match anything
     // This effectively filters out everything
-    onUpdate({ categories: ['__none__' as TestCategory] })
+    onChange(['__none__' as TestCategory])
   }
 
   // Check if a category is a valid one (not the special '__none__' marker)
   const isValidCategory = (cat: string): cat is TestCategory => ALL_CATEGORIES.includes(cat as TestCategory)
 
-  const getSelectedValidCategories = () => state.categories.filter(isValidCategory)
+  const getSelectedValidCategories = () => categories.filter(isValidCategory)
 
   const getCategoryLabel = () => {
     const validCategories = getSelectedValidCategories()
-    if (state.categories.length === 0) {
+    if (categories.length === 0) {
       return 'All Categories'
     }
     if (validCategories.length === 0) {
@@ -108,125 +118,143 @@ export function DashboardFilters({ state, stats, onUpdate }: DashboardFiltersPro
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-4 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-      {/* Category Filter */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-500 dark:text-gray-400">Category:</span>
-        <div className="relative" ref={dropdownRef}>
-          <button
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="flex items-center gap-2 rounded-sm border border-gray-300 bg-white px-3 py-1.5 text-left text-sm dark:border-gray-600 dark:bg-gray-700"
-          >
-            {getSelectedValidCategories().length === 1 && (
-              <span
-                className="size-2.5 rounded-full"
-                style={{ backgroundColor: CATEGORY_COLORS[getSelectedValidCategories()[0]] }}
-              />
-            )}
-            <span className="text-gray-900 dark:text-gray-100">{getCategoryLabel()}</span>
-            <ChevronDown className="size-4 text-gray-400" />
-          </button>
-
-          {isDropdownOpen && (
-            <div className="absolute z-20 mt-1 w-56 rounded-sm border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-600 dark:bg-gray-700">
-              {/* Select All / None buttons */}
-              <div className="flex gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-600">
-                <button
-                  onClick={selectAll}
-                  className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                >
-                  All
-                </button>
-                <span className="text-gray-300 dark:text-gray-600">|</span>
-                <button
-                  onClick={selectNone}
-                  className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                >
-                  None
-                </button>
-              </div>
-
-              {/* Category checkboxes */}
-              <div className="max-h-64 overflow-y-auto">
-                {CATEGORY_OPTIONS.filter((option) => (stats?.categoryBreakdown[option.value] ?? 0) > 0).map((option) => {
-                  const isSelected = state.categories.length === 0 || state.categories.includes(option.value)
-                  const count = stats?.categoryBreakdown[option.value] ?? 0
-                  const hasNoneSelected = state.categories.length > 0 && getSelectedValidCategories().length === 0
-
-                  return (
-                    <label
-                      key={option.value}
-                      className="flex cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-600"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected && !hasNoneSelected}
-                        onChange={() => toggleCategory(option.value)}
-                        className="rounded-xs border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600"
-                      />
-                      <span
-                        className="size-2.5 rounded-full"
-                        style={{ backgroundColor: CATEGORY_COLORS[option.value] }}
-                      />
-                      <span className="flex-1 text-sm text-gray-900 dark:text-gray-100">{option.label}</span>
-                      <span className="text-xs text-gray-500 dark:text-gray-400">{count}</span>
-                    </label>
-                  )
-                })}
-              </div>
-            </div>
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-gray-500 dark:text-gray-400">Category:</span>
+      <div className="relative" ref={dropdownRef}>
+        <button
+          onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+          className="flex items-center gap-2 rounded-sm border border-gray-300 bg-white px-3 py-1.5 text-left text-sm dark:border-gray-600 dark:bg-gray-700"
+        >
+          {getSelectedValidCategories().length === 1 && (
+            <span
+              className="size-2.5 rounded-full"
+              style={{ backgroundColor: CATEGORY_COLORS[getSelectedValidCategories()[0]] }}
+            />
           )}
-        </div>
-      </div>
+          <span className="text-gray-900 dark:text-gray-100">{getCategoryLabel()}</span>
+          <ChevronDown className="size-4 text-gray-400" />
+        </button>
 
-      {/* Throughput Range */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-500 dark:text-gray-400">MGas/s:</span>
-        <input
-          type="number"
-          placeholder="Min"
-          value={state.minThroughput ?? ''}
-          onChange={(e) => onUpdate({ minThroughput: e.target.value ? Number(e.target.value) : undefined })}
-          className="w-16 rounded-sm border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-        />
-        {stats && (
-          <div className="relative flex w-32 items-center">
-            <input
-              type="range"
-              min={0}
-              max={Math.ceil(stats.maxThroughput)}
-              step={1}
-              value={state.minThroughput ?? 0}
-              onChange={(e) => {
-                const val = Number(e.target.value)
-                const maxVal = state.maxThroughput ?? Math.ceil(stats.maxThroughput)
-                onUpdate({ minThroughput: val > 0 ? Math.min(val, maxVal) : undefined })
-              }}
-              className="pointer-events-none absolute h-1 w-full appearance-none rounded-sm bg-gray-200 dark:bg-gray-600 [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:hover:bg-blue-600"
-            />
-            <input
-              type="range"
-              min={0}
-              max={Math.ceil(stats.maxThroughput)}
-              step={1}
-              value={state.maxThroughput ?? Math.ceil(stats.maxThroughput)}
-              onChange={(e) => {
-                const val = Number(e.target.value)
-                const minVal = state.minThroughput ?? 0
-                onUpdate({ maxThroughput: Math.max(val, minVal) })
-              }}
-              className="pointer-events-none absolute h-1 w-full appearance-none rounded-sm bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:hover:bg-blue-600"
-            />
+        {isDropdownOpen && (
+          <div className="absolute z-20 mt-1 w-56 rounded-sm border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-600 dark:bg-gray-700">
+            {/* Select All / None buttons */}
+            <div className="flex gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-600">
+              <button
+                onClick={selectAll}
+                className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                All
+              </button>
+              <span className="text-gray-300 dark:text-gray-600">|</span>
+              <button
+                onClick={selectNone}
+                className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                None
+              </button>
+            </div>
+
+            {/* Category checkboxes */}
+            <div className="max-h-64 overflow-y-auto">
+              {CATEGORY_OPTIONS.filter((option) => (breakdown[option.value]) > 0).map((option) => {
+                const isSelected = categories.length === 0 || categories.includes(option.value)
+                const count = breakdown[option.value]
+                const hasNoneSelected = categories.length > 0 && getSelectedValidCategories().length === 0
+
+                return (
+                  <label
+                    key={option.value}
+                    className="flex cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-600"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected && !hasNoneSelected}
+                      onChange={() => toggleCategory(option.value)}
+                      className="rounded-xs border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600"
+                    />
+                    <span
+                      className="size-2.5 rounded-full"
+                      style={{ backgroundColor: CATEGORY_COLORS[option.value] }}
+                    />
+                    <span className="flex-1 text-sm text-gray-900 dark:text-gray-100">{option.label}</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">{count}</span>
+                  </label>
+                )
+              })}
+            </div>
           </div>
         )}
-        <input
-          type="number"
-          placeholder="Max"
-          value={state.maxThroughput ?? ''}
-          onChange={(e) => onUpdate({ maxThroughput: e.target.value ? Number(e.target.value) : undefined })}
-          className="w-16 rounded-sm border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-        />
       </div>
+    </div>
+  )
+}
+
+interface ThroughputRangeFilterProps {
+  min?: number
+  max?: number
+  /** The largest throughput of the data, which is the far end of the sliders. Without one, the fields alone remain. */
+  limit?: number
+  onChange: (range: { minThroughput?: number; maxThroughput?: number }) => void
+}
+
+/** The throughput range of a dashboard filter bar, two fields and a pair of sliders between them. */
+export function ThroughputRangeFilter({ min, max, limit, onChange }: ThroughputRangeFilterProps) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-gray-500 dark:text-gray-400">MGas/s:</span>
+      <input
+        type="number"
+        placeholder="Min"
+        value={min ?? ''}
+        onChange={(e) => onChange({ minThroughput: e.target.value ? Number(e.target.value) : undefined })}
+        className="w-16 rounded-sm border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+      />
+      {limit !== undefined && (
+        <div className="relative flex w-32 items-center">
+          <input
+            type="range"
+            min={0}
+            max={Math.ceil(limit)}
+            step={1}
+            value={min ?? 0}
+            onChange={(e) => {
+              const val = Number(e.target.value)
+              const maxVal = max ?? Math.ceil(limit)
+              onChange({ minThroughput: val > 0 ? Math.min(val, maxVal) : undefined })
+            }}
+            className="pointer-events-none absolute h-1 w-full appearance-none rounded-sm bg-gray-200 dark:bg-gray-600 [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:hover:bg-blue-600"
+          />
+          <input
+            type="range"
+            min={0}
+            max={Math.ceil(limit)}
+            step={1}
+            value={max ?? Math.ceil(limit)}
+            onChange={(e) => {
+              const val = Number(e.target.value)
+              const minVal = min ?? 0
+              onChange({ maxThroughput: Math.max(val, minVal) })
+            }}
+            className="pointer-events-none absolute h-1 w-full appearance-none rounded-sm bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:hover:bg-blue-600"
+          />
+        </div>
+      )}
+      <input
+        type="number"
+        placeholder="Max"
+        value={max ?? ''}
+        onChange={(e) => onChange({ maxThroughput: e.target.value ? Number(e.target.value) : undefined })}
+        className="w-16 rounded-sm border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+      />
+    </div>
+  )
+}
+
+export function DashboardFilters({ state, stats, onUpdate }: DashboardFiltersProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-4 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+      <CategoryFilter categories={state.categories} breakdown={stats?.categoryBreakdown ?? emptyCategoryBreakdown()} onChange={(categories) => onUpdate({ categories })} />
+      <ThroughputRangeFilter min={state.minThroughput} max={state.maxThroughput} limit={stats?.maxThroughput} onChange={onUpdate} />
 
       {/* Toggles */}
       <div className="flex items-center gap-4">

@@ -113,6 +113,34 @@ export function calculateBoxPlotStats(data: ProcessedTestData[]): BoxPlotStats[]
   return result
 }
 
+export interface CategorySummary {
+  category: TestCategory
+  count: number
+  min: number
+  median: number
+  avg: number
+  max: number
+}
+
+/**
+ * Summarise one figure of the data per category, in the order of ALL_CATEGORIES, leaving out a category no item holds.
+ */
+export function summariseByCategory<T extends { category: TestCategory }>(data: T[], getValue: (item: T) => number): CategorySummary[] {
+  return ALL_CATEGORIES.flatMap((category) => {
+    const values = data.filter((item) => item.category === category).map(getValue).sort((a, b) => a - b)
+    if (values.length === 0) return []
+
+    return [{
+      category,
+      count: values.length,
+      min: values[0],
+      max: values[values.length - 1],
+      median: percentile(values, 50),
+      avg: values.reduce((a, b) => a + b, 0) / values.length,
+    }]
+  })
+}
+
 /**
  * Create an empty category breakdown object with all categories initialized to 0.
  */

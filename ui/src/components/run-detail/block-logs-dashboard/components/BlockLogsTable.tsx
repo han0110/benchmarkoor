@@ -36,16 +36,17 @@ function formatGas(gas: number): string {
   return gas.toString()
 }
 
-interface SortHeaderProps {
+interface SortHeaderProps<F extends string> {
   label: string
-  field: SortField
-  currentSort: SortField
+  field: F
+  currentSort: F
   currentOrder: SortOrder
-  onSort: (field: SortField, order: SortOrder) => void
+  onSort: (field: F, order: SortOrder) => void
   align?: 'left' | 'right'
 }
 
-function SortHeader({ label, field, currentSort, currentOrder, onSort, align = 'left' }: SortHeaderProps) {
+/** A column header that sorts the table on its field, descending first. */
+export function SortHeader<F extends string>({ label, field, currentSort, currentOrder, onSort, align = 'left' }: SortHeaderProps<F>) {
   const isActive = currentSort === field
   const nextOrder: SortOrder = isActive && currentOrder === 'desc' ? 'asc' : 'desc'
 
@@ -64,11 +65,53 @@ function SortHeader({ label, field, currentSort, currentOrder, onSort, align = '
   )
 }
 
+interface PageControlsProps {
+  currentPage: number
+  pageSize: number
+  total: number
+  onPageChange: (page: number) => void
+  onPageSizeChange: (size: number) => void
+}
+
+/** The page size and the page of a dashboard table, shown above and below it. */
+export function PageControls({ currentPage, pageSize, total, onPageChange, onPageSizeChange }: PageControlsProps) {
+  const startItem = (currentPage - 1) * pageSize + 1
+  const endItem = Math.min(currentPage * pageSize, total)
+
+  return (
+    <div className="flex items-center justify-between bg-gray-50 px-4 py-3 dark:bg-gray-800/50">
+      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+        <span>Show</span>
+        <select
+          value={pageSize}
+          onChange={(e) => onPageSizeChange(Number(e.target.value))}
+          className="rounded-sm border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+        >
+          {PAGE_SIZE_OPTIONS.map((size) => (
+            <option key={size} value={size}>
+              {size}
+            </option>
+          ))}
+        </select>
+        <span>per page</span>
+      </div>
+
+      <div className="text-sm text-gray-600 dark:text-gray-400">
+        {startItem}-{endItem} of {total}
+      </div>
+
+      <Pagination
+        currentPage={currentPage}
+        totalPages={Math.ceil(total / pageSize)}
+        onPageChange={onPageChange}
+      />
+    </div>
+  )
+}
+
 export function BlockLogsTable({ data, state, onUpdate, onTestClick, timeLabel, isProving }: BlockLogsTableProps) {
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-
-  const totalPages = Math.ceil(data.length / pageSize)
 
   const paginatedData = useMemo(() => {
     const startIndex = (currentPage - 1) * pageSize
@@ -99,37 +142,8 @@ export function BlockLogsTable({ data, state, onUpdate, onTestClick, timeLabel, 
     )
   }
 
-  const startItem = (currentPage - 1) * pageSize + 1
-  const endItem = Math.min(currentPage * pageSize, data.length)
-
   const paginationControls = (
-    <div className="flex items-center justify-between bg-gray-50 px-4 py-3 dark:bg-gray-800/50">
-      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-        <span>Show</span>
-        <select
-          value={pageSize}
-          onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-          className="rounded-sm border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
-        >
-          {PAGE_SIZE_OPTIONS.map((size) => (
-            <option key={size} value={size}>
-              {size}
-            </option>
-          ))}
-        </select>
-        <span>per page</span>
-      </div>
-
-      <div className="text-sm text-gray-600 dark:text-gray-400">
-        {startItem}-{endItem} of {data.length}
-      </div>
-
-      <Pagination
-        currentPage={currentPage}
-        totalPages={totalPages}
-        onPageChange={setCurrentPage}
-      />
-    </div>
+    <PageControls currentPage={currentPage} pageSize={pageSize} total={data.length} onPageChange={setCurrentPage} onPageSizeChange={handlePageSizeChange} />
   )
 
   return (

@@ -23,9 +23,11 @@ interface ChartSectionProps {
   onZoom: (start: number, end: number) => void
   onPointClick?: (testName: string) => void
   highlightedTestRef?: React.MutableRefObject<string | null>
+  /** Height of the plot, raised where a dense chart needs the room. */
+  height?: string
 }
 
-export function ChartSection({ title, option, onZoom, onPointClick, highlightedTestRef }: ChartSectionProps) {
+export function ChartSection({ title, option, onZoom, onPointClick, highlightedTestRef, height = '200px' }: ChartSectionProps) {
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null)
 
   const onEvents = useMemo(
@@ -71,7 +73,7 @@ export function ChartSection({ title, option, onZoom, onPointClick, highlightedT
       >
         <ReactECharts
           option={option}
-          style={{ height: '200px', width: '100%' }}
+          style={{ height, width: '100%' }}
           opts={{ renderer: 'svg' }}
           onEvents={onEvents}
         />

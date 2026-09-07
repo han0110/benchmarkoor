@@ -221,7 +221,7 @@ interface ChartOptionBuilderArgs<P extends ChartPoint> {
   isDark: boolean
   nameMode: ReturnType<typeof useNameDisplayMode>['mode']
   zoomRange: ZoomRange
-  /** One tooltip line naming how many devices the point rests on. Module scoped, so the options stay memoised. */
+  /** One tooltip line naming how many devices the point rests on, left out when empty. Module scoped, so the options stay memoised. */
   describe: (point: P) => string
 }
 
@@ -281,7 +281,9 @@ export function useChartOptionBuilder<P extends ChartPoint>({ dataPoints, isDark
               formatTestNameLong(point.testName, nameMode),
               ...series.map((s) => `${s.name}: <strong>${show(s.value(point))}</strong>${note(s.detail?.(point))}`),
               describe(point),
-            ].join('<br/>')
+            ]
+              .filter((line) => line !== '')
+              .join('<br/>')
           },
         },
         yAxis: {

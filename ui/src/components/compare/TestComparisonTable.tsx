@@ -2,19 +2,22 @@ import { useMemo, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import clsx from 'clsx'
 import { Table } from 'lucide-react'
-import type { SuiteTest, AggregatedStats, BlockLogs, BlockLogEntry } from '@/api/types'
+import type { SuiteTest, AggregatedStats, BlockLogs, BlockLogEntry, RunEstimate, TestEstimate } from '@/api/types'
 import { type StepTypeOption, getAggregatedStats } from '@/pages/RunDetailPage'
 import { Pagination } from '@/components/shared/Pagination'
 import { TestName } from '@/components/shared/TestName'
 import { type CompareRun, type LabelMode, RUN_SLOTS, formatRunLabel } from './constants'
 import { getClientLogoUrl } from '@/utils/client-colors'
 import { isProvingRun, measuredTimeLabel, measuredTimeMs } from '@/utils/blockLogs'
+import { costTotal, formatCost, reportsHeap, sameZkvm } from '@/utils/estimate'
+import { formatBytes } from '@/utils/format'
 
 interface TestComparisonTableProps {
   runs: CompareRun[]
   suiteTests?: SuiteTest[]
   stepFilter: StepTypeOption[]
   blockLogsPerRun?: (BlockLogs | null)[]
+  estimatesPerRun?: (RunEstimate | null)[]
   labelMode: LabelMode
   tableBaseline: TableBaseline
   onTableBaselineChange: (val: TableBaseline) => void
@@ -58,6 +61,15 @@ const BLOCK_LOG_METRICS: MetricTab[] = [
   { id: 'bl-storage-cache', label: 'Storage Cache HR', unit: '%', higherIsBetter: true, format: (v) => v.toFixed(1) },
   { id: 'bl-code-cache', label: 'Code Cache HR', unit: '%', higherIsBetter: true, format: (v) => v.toFixed(1) },
 ]
+
+const ESTIMATE_METRICS: MetricTab[] = [
+  { id: 'est-cost', label: 'Estimated Cost', unit: '', higherIsBetter: false, format: formatCost },
+  { id: 'est-heap', label: 'Peak Heap', unit: '', higherIsBetter: false, format: formatBytes },
+]
+
+function extractEstimateMetric(test: TestEstimate, metricId: string): number | undefined {
+  return metricId === 'est-cost' ? costTotal(test.cost) : test.peak_heap_bytes
+}
 
 function extractBlockLogMetric(entry: BlockLogEntry, metricId: string, isProving: boolean): number {
   switch (metricId) {
@@ -140,11 +152,15 @@ function SortableHeader({
 
 const PAGE_SIZE = 50
 
-export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPerRun, labelMode, tableBaseline, onTableBaselineChange, sortBy, sortDir, onSortChange, testNameFilter, searchQuery, onChipFilterToggle, onTestClick }: TestComparisonTableProps) {
+export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPerRun, estimatesPerRun, labelMode, tableBaseline, onTableBaselineChange, sortBy, sortDir, onSortChange, testNameFilter, searchQuery, onChipFilterToggle, onTestClick }: TestComparisonTableProps) {
   const [activeTab, setActiveTab] = useState('mgas')
   const [currentPage, setCurrentPage] = useState(1)
 
   const hasBlockLogs = blockLogsPerRun?.some((bl) => bl !== null) ?? false
+  const estimates = useMemo(
+    () => (estimatesPerRun ?? []).flatMap((estimate) => (estimate ? [estimate] : [])),
+    [estimatesPerRun],
+  )
 
   // The compare page rejects a set mixing proving and executing runs, so one
   // flag describes every run reaching this table.
@@ -155,13 +171,21 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
     const base: MetricTab[] = [
       { id: 'mgas', label: 'MGas/s', unit: 'MGas/s', higherIsBetter: true, format: (v) => v >= 100 ? v.toFixed(0) : v.toFixed(2) },
     ]
+    // Cost compares only within one zkVM. Heap needs each estimate to report it.
+    const estimateTabs = estimates.length < 2 ? [] : ESTIMATE_METRICS.filter((metric) =>
+      metric.id === 'est-cost' ? sameZkvm(estimates) : estimates.every(reportsHeap),
+    )
     if (hasBlockLogs) {
-      return [...base, ...BLOCK_LOG_METRICS.map((metric) =>
+      // Proving runs report no overhead timing and no cache figures.
+      const blockLogTabs = isProving
+        ? BLOCK_LOG_METRICS.filter((metric) => metric.id === 'bl-throughput' || metric.id === 'bl-execution')
+        : BLOCK_LOG_METRICS
+      return [...base, ...blockLogTabs.map((metric) =>
         metric.id === 'bl-execution' ? { ...metric, label: `${timeLabel} Time` } : metric
-      )]
+      ), ...estimateTabs]
     }
-    return base
-  }, [hasBlockLogs, timeLabel])
+    return [...base, ...estimateTabs]
+  }, [hasBlockLogs, isProving, timeLabel, estimates])
 
   const activeMetric = tabs.find((t) => t.id === activeTab) ?? tabs[0]
 
@@ -173,10 +197,19 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
     return map
   }, [suiteTests])
 
+  // The active tab can disappear when a run leaves the set, thus the values
+  // follow the resolved metric.
+  const metricId = activeMetric.id
+  const isEstimateTab = metricId.startsWith('est-')
+
   const comparedTests = useMemo(() => {
     const allTestNames = new Set<string>()
 
-    if (activeTab === 'mgas') {
+    if (isEstimateTab) {
+      for (const estimate of estimates) {
+        for (const name of Object.keys(estimate.tests)) allTestNames.add(name)
+      }
+    } else if (metricId === 'mgas') {
       for (const run of runs) {
         if (run.result) {
           for (const name of Object.keys(run.result.tests)) allTestNames.add(name)
@@ -195,7 +228,12 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
       const values: (number | undefined)[] = []
       let order = suiteOrder.get(name) ?? 0
 
-      if (activeTab === 'mgas') {
+      if (isEstimateTab) {
+        for (let i = 0; i < runs.length; i++) {
+          const test = estimatesPerRun?.[i]?.tests[name]
+          values.push(test ? extractEstimateMetric(test, metricId) : undefined)
+        }
+      } else if (metricId === 'mgas') {
         for (const run of runs) {
           const entry = run.result?.tests[name]
           const stats = entry ? getAggregatedStats(entry, stepFilter) : undefined
@@ -208,7 +246,7 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
         for (let i = 0; i < runs.length; i++) {
           const bl = blockLogsPerRun?.[i]
           const entry = bl?.[name]
-          values.push(entry ? extractBlockLogMetric(entry, activeTab, isProving) : undefined)
+          values.push(entry ? extractBlockLogMetric(entry, metricId, isProving) : undefined)
         }
       }
 
@@ -233,7 +271,7 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
       tests.push({ name, order, gasUsed, values, avgValue })
     }
     return tests
-  }, [runs, suiteOrder, stepFilter, activeTab, blockLogsPerRun, isProving])
+  }, [runs, suiteOrder, stepFilter, metricId, blockLogsPerRun, isProving, isEstimateTab, estimates, estimatesPerRun])
 
   const filteredTests = useMemo(() => {
     if (!testNameFilter) return comparedTests
@@ -309,7 +347,7 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
               title={tab.id.startsWith('bl-') ? 'Extracted from block logs' : undefined}
               className={clsx(
                 'shrink-0 border-b-2 px-3 py-2 text-xs/5 font-medium transition-colors',
-                activeTab === tab.id
+                metricId === tab.id
                   ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-400'
                   : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-gray-600 dark:hover:text-gray-300',
               )}
@@ -387,7 +425,7 @@ export function TestComparisonTable({ runs, suiteTests, stepFilter, blockLogsPer
                         {slot.label}
                         {isSortable && <SortIcon direction={isActive ? sortDir : 'asc'} active={isActive} />}
                       </span>
-                      <span>{activeMetric.unit}</span>
+                      {activeMetric.unit && <span>{activeMetric.unit}</span>}
                     </div>
                   </th>
                 )

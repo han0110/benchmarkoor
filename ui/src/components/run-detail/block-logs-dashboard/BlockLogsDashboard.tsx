@@ -1,15 +1,34 @@
 import { useEffect, useMemo, useState } from 'react'
 import { TabPanel } from '@headlessui/react'
-import { Blocks, CircleHelp, X, Maximize2 } from 'lucide-react'
+import { BarChart2, BarChart3, Blocks, CircleHelp, Database, X, Maximize2 } from 'lucide-react'
 import type { BlockLogs, SuiteTest } from '@/api/types'
+import type { DashboardTab } from './types'
 import { useDashboardState } from './hooks/useDashboardState'
 import { useProcessedData } from './hooks/useProcessedData'
 import { DashboardFilters } from './components/DashboardFilters'
-import { DashboardTabs } from './components/DashboardTabs'
+import { DashboardTabs, type DashboardTabOption } from './components/DashboardTabs'
 import { BlockLogsTable } from './components/BlockLogsTable'
 import { OverviewTab } from './components/OverviewTab'
 import { CacheTab } from './components/CacheTab'
 import { DistributionTab } from './components/DistributionTab'
+
+const TABS: DashboardTabOption<DashboardTab>[] = [
+  {
+    value: 'overview',
+    label: 'Overview',
+    icon: <BarChart3 className="size-4" />,
+  },
+  {
+    value: 'cache',
+    label: 'Cache',
+    icon: <Database className="size-4" />,
+  },
+  {
+    value: 'distribution',
+    label: 'Distribution',
+    icon: <BarChart2 className="size-4" />,
+  },
+]
 
 interface BlockLogsDashboardProps {
   blockLogs: BlockLogs | null | undefined
@@ -124,6 +143,7 @@ export function BlockLogsDashboard({ blockLogs, runId, suiteTests, onTestClick, 
 
       {/* Tabs */}
       <DashboardTabs
+        tabs={TABS}
         activeTab={state.activeTab}
         onTabChange={(tab) => updateState({ activeTab: tab })}
       >

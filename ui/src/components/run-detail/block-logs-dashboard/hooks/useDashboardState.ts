@@ -23,7 +23,7 @@ const DEFAULT_STATE: DashboardState = {
   useLogScale: false,
 }
 
-function parseCategories(value: string | undefined): TestCategory[] {
+export function parseCategories(value: string | undefined): TestCategory[] {
   if (!value) return []
   // Preserve the special '__none__' sentinel value that indicates "no categories selected"
   if (value === '__none__') return ['__none__' as TestCategory]

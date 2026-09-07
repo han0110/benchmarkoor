@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { Blocks } from 'lucide-react'
-import type { BlockLogs, SuiteTest } from '@/api/types'
+import type { BlockLogs, RunEstimate, SuiteTest } from '@/api/types'
 import { type CompareRun, type LabelMode, RUN_SLOTS, formatRunLabel } from './constants'
 import { formatTestNameLong } from '@/utils/eestName'
 import { useNameDisplayMode } from '@/hooks/useNameDisplayMode'
 import { getClientLogoUrl } from '@/utils/client-colors'
 import { isProvingRun, measuredTimeLabel, measuredTimeMs } from '@/utils/blockLogs'
+import { formatBytes } from '@/utils/format'
+import { costTotal, formatCost, reportsHeap, sameZkvm } from '@/utils/estimate'
 
 function useDarkMode() {
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'))
@@ -31,6 +33,8 @@ interface BlockLogDataPoint {
   accountCacheHitRate: number
   storageCacheHitRate: number
   codeCacheHitRate: number
+  estimatedCost: number | null
+  peakHeapBytes: number | null
 }
 
 /** Build a unified, sorted list of test names across all runs. */
@@ -66,11 +70,13 @@ function buildBlockLogDataPoints(
   blockLogs: BlockLogs,
   unifiedTests: string[],
   isProving: boolean,
+  estimate: RunEstimate | null,
 ): BlockLogDataPoint[] {
   const points: BlockLogDataPoint[] = []
   unifiedTests.forEach((testName, index) => {
     const entry = blockLogs[testName]
     if (!entry) return
+    const cost = estimate?.tests[testName]?.cost
     points.push({
       testIndex: index + 1,
       testName,
@@ -80,6 +86,8 @@ function buildBlockLogDataPoints(
       accountCacheHitRate: entry.cache?.account?.hit_rate ?? 0,
       storageCacheHitRate: entry.cache?.storage?.hit_rate ?? 0,
       codeCacheHitRate: entry.cache?.code?.hit_rate ?? 0,
+      estimatedCost: cost ? costTotal(cost) : null,
+      peakHeapBytes: estimate?.tests[testName]?.peak_heap_bytes ?? null,
     })
   })
   return points
@@ -125,9 +133,10 @@ interface BlockLogsComparisonProps {
   suiteTests?: SuiteTest[]
   labelMode: LabelMode
   testNameFilter?: (name: string) => boolean
+  estimatesPerRun: (RunEstimate | null)[]
 }
 
-export function BlockLogsComparison({ runs, blockLogsPerRun, blockLogsLoading, suiteTests, labelMode, testNameFilter }: BlockLogsComparisonProps) {
+export function BlockLogsComparison({ runs, blockLogsPerRun, blockLogsLoading, suiteTests, labelMode, testNameFilter, estimatesPerRun }: BlockLogsComparisonProps) {
   const { mode: nameMode } = useNameDisplayMode()
   // The compare page rejects a set mixing proving and executing runs, so one
   // flag describes every run reaching these charts.
@@ -150,11 +159,15 @@ export function BlockLogsComparison({ runs, blockLogsPerRun, blockLogsLoading, s
   )
 
   const pointsPerRun = useMemo(
-    () => blockLogsPerRun.map((bl) => (bl ? buildBlockLogDataPoints(bl, unifiedTests, isProving) : [])),
-    [blockLogsPerRun, unifiedTests, isProving],
+    () => blockLogsPerRun.map((bl, i) => (bl ? buildBlockLogDataPoints(bl, unifiedTests, isProving, estimatesPerRun[i]) : [])),
+    [blockLogsPerRun, unifiedTests, isProving, estimatesPerRun],
   )
 
   const hasAnyData = blockLogsPerRun.some((bl) => bl !== null)
+  // Costs of different zkVMs are not on one scale, so one axis cannot hold them.
+  const comparableCosts = estimatesPerRun.some((estimate) => estimate !== null) && sameZkvm(estimatesPerRun)
+  // A heap is bytes whatever the zkVM, so one axis holds every run that reports it.
+  const comparableHeaps = estimatesPerRun.some((estimate) => estimate !== null && reportsHeap(estimate))
   const runsWithData = runs.filter((_, i) => blockLogsPerRun[i] !== null)
   const runsWithoutData = runs.filter((_, i) => blockLogsPerRun[i] === null)
 
@@ -310,6 +323,8 @@ export function BlockLogsComparison({ runs, blockLogsPerRun, blockLogsLoading, s
       accountCacheHitRate: buildChart('accountCacheHitRate', (v) => `${v.toFixed(0)}%`, (v) => `${v.toFixed(1)}%`),
       storageCacheHitRate: buildChart('storageCacheHitRate', (v) => `${v.toFixed(0)}%`, (v) => `${v.toFixed(1)}%`),
       codeCacheHitRate: buildChart('codeCacheHitRate', (v) => `${v.toFixed(0)}%`, (v) => `${v.toFixed(1)}%`),
+      estimatedCost: buildChart('estimatedCost', formatCost, formatCost),
+      peakHeap: buildChart('peakHeapBytes', formatBytes, formatBytes),
     }
   }, [pointsPerRun, runs, runsWithData, isDark, zoomRange, unifiedTests, labelMode, suiteTests, nameMode])
 
@@ -353,10 +368,17 @@ export function BlockLogsComparison({ runs, blockLogsPerRun, blockLogsLoading, s
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ChartSection title="Throughput (MGas/s)" option={chartOptions.throughput} onZoom={handleZoom} />
         <ChartSection title={`${timeLabel} Time (ms)`} option={chartOptions.executionMs} onZoom={handleZoom} />
-        <ChartSection title="Overhead — State Read/Hash/Commit (ms)" option={chartOptions.overheadMs} onZoom={handleZoom} />
-        <ChartSection title="Account Cache Hit Rate (%)" option={chartOptions.accountCacheHitRate} onZoom={handleZoom} />
-        <ChartSection title="Storage Cache Hit Rate (%)" option={chartOptions.storageCacheHitRate} onZoom={handleZoom} />
-        <ChartSection title="Code Cache Hit Rate (%)" option={chartOptions.codeCacheHitRate} onZoom={handleZoom} />
+        {comparableCosts && <ChartSection title="Estimated Cost" option={chartOptions.estimatedCost} onZoom={handleZoom} />}
+        {comparableHeaps && <ChartSection title="Peak Heap" option={chartOptions.peakHeap} onZoom={handleZoom} />}
+        {/* Proving runs report no overhead timing and no cache figures. */}
+        {!isProving && (
+          <>
+            <ChartSection title="Overhead — State Read/Hash/Commit (ms)" option={chartOptions.overheadMs} onZoom={handleZoom} />
+            <ChartSection title="Account Cache Hit Rate (%)" option={chartOptions.accountCacheHitRate} onZoom={handleZoom} />
+            <ChartSection title="Storage Cache Hit Rate (%)" option={chartOptions.storageCacheHitRate} onZoom={handleZoom} />
+            <ChartSection title="Code Cache Hit Rate (%)" option={chartOptions.codeCacheHitRate} onZoom={handleZoom} />
+          </>
+        )}
       </div>
 
       <p className="mt-4 text-center text-xs/5 text-gray-500 dark:text-gray-400">

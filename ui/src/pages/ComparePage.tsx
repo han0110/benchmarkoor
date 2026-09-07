@@ -5,6 +5,7 @@ import { useQueries } from '@tanstack/react-query'
 import { type IndexStepType, ALL_INDEX_STEP_TYPES } from '@/api/types'
 import type { BlockLogs, RunConfig, RunResult } from '@/api/types'
 import { fetchData } from '@/api/client'
+import { useEstimates } from '@/api/hooks/useEstimate'
 import { testNameMatches, toggleSearchTerm, TEST_FILTER_HINT } from '@/utils/eestNameFilter'
 import { useSuite } from '@/api/hooks/useSuite'
 import { LoadingState } from '@/components/shared/Spinner'
@@ -22,6 +23,7 @@ import { PercentageDiffChart } from '@/components/compare/PercentageDiffChart'
 import { TestComparisonTable } from '@/components/compare/TestComparisonTable'
 import { ResourceComparisonCharts } from '@/components/compare/ResourceComparisonCharts'
 import { BlockLogsComparison } from '@/components/compare/BlockLogsComparison'
+import { EstimatedCostComposition } from '@/components/compare/EstimatedCostComposition'
 import { ConfigDiff } from '@/components/compare/ConfigDiff'
 import { type StepTypeOption, ALL_STEP_TYPES, DEFAULT_STEP_FILTER } from '@/pages/RunDetailPage'
 import { MIN_COMPARE_RUNS, MAX_COMPARE_RUNS, buildLabelModeOptions, type CompareRun, type LabelMode } from '@/components/compare/constants'
@@ -113,6 +115,8 @@ export function ComparePage() {
   })
   const blockLogsPerRun = blockLogQueries.map((q) => q.data ?? null)
   const blockLogsLoading = blockLogQueries.some((q) => q.isLoading)
+
+  const estimatesPerRun = useEstimates(runIds)
 
   const suiteHash = configQueries.find((q) => q.data?.suite_hash)?.data?.suite_hash
   const { data: suite } = useSuite(suiteHash)
@@ -490,7 +494,9 @@ export function ComparePage() {
         <PercentageDiffChart runs={runs} suiteTests={suite?.tests} stepFilter={stepFilter} baselineIdx={baselineIdx} onBaselineChange={setBaselineIdx} labelMode={labelMode} diffFilter={diffFilter} onDiffFilterChange={setDiffFilter} testNameFilter={testNameFilter} zoomRange={sharedZoom ? chartZoom : undefined} onZoomChange={sharedZoom ? setChartZoom : undefined} chartType={chartType} />
       )}
 
-      <BlockLogsComparison runs={runs} blockLogsPerRun={blockLogsPerRun} blockLogsLoading={blockLogsLoading} suiteTests={suite?.tests} labelMode={labelMode} testNameFilter={testNameFilter} />
+      <BlockLogsComparison runs={runs} blockLogsPerRun={blockLogsPerRun} blockLogsLoading={blockLogsLoading} suiteTests={suite?.tests} labelMode={labelMode} testNameFilter={testNameFilter} estimatesPerRun={estimatesPerRun} />
+
+      <EstimatedCostComposition runs={runs} estimatesPerRun={estimatesPerRun} blockLogsPerRun={blockLogsPerRun} suiteTests={suite?.tests} labelMode={labelMode} testNameFilter={testNameFilter} />
 
       {allResults && <ResourceComparisonCharts runs={runs} labelMode={labelMode} testNameFilter={testNameFilter} suiteTests={suite?.tests} zoomRange={sharedZoom ? chartZoom : undefined} onZoomChange={sharedZoom ? setChartZoom : undefined} chartType={chartType} />}
 
@@ -502,10 +508,11 @@ export function ComparePage() {
         testNameFilter={testNameFilter}
         query={testFilter}
         onToggle={(term) => setTestFilter(toggleSearchTerm(testFilter, term))}
+        estimatesPerRun={estimatesPerRun}
       />
 
       {allResults && (
-        <TestComparisonTable runs={runs} suiteTests={suite?.tests} stepFilter={stepFilter} blockLogsPerRun={blockLogsPerRun} labelMode={labelMode} tableBaseline={tableBaseline} onTableBaselineChange={setTableBaseline} sortBy={tableSortBy} sortDir={tableSortDir} onSortChange={setTableSort} testNameFilter={testNameFilter} searchQuery={testFilter} onChipFilterToggle={(term) => setTestFilter(toggleSearchTerm(testFilter, term))} />
+        <TestComparisonTable runs={runs} suiteTests={suite?.tests} stepFilter={stepFilter} blockLogsPerRun={blockLogsPerRun} estimatesPerRun={estimatesPerRun} labelMode={labelMode} tableBaseline={tableBaseline} onTableBaselineChange={setTableBaseline} sortBy={tableSortBy} sortDir={tableSortDir} onSortChange={setTableSort} testNameFilter={testNameFilter} searchQuery={testFilter} onChipFilterToggle={(term) => setTestFilter(toggleSearchTerm(testFilter, term))} />
       )}
 
       <ConfigDiff runs={runs} labelMode={labelMode} />
