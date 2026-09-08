@@ -7,12 +7,15 @@ import (
 )
 
 // Stat is one metric reduced over one window. A counter reports Total and
-// PeakRate, and a gauge reports Mean, Min and Max.
+// PeakRate, and a gauge reports Mean, Min, Max and Bits.
 type Stat struct {
 	Total float64 `json:"total,omitempty"`
 	Mean  float64 `json:"mean,omitempty"`
 	Min   float64 `json:"min,omitempty"`
 	Max   float64 `json:"max,omitempty"`
+	// Bits is the union of every reading of a gauge that is a bitmask, so a
+	// window reports each reason that was set at any scrape of it.
+	Bits uint64 `json:"bits,omitempty"`
 	// PeakRate is the fastest a counter advanced between two source
 	// refreshes, per second. A total spread over the whole window reports an
 	// average, and an average hides the burst that saturates a link or a bus.
@@ -283,6 +286,7 @@ func gaugeStat(points []point, start, end time.Time) (Stat, int, bool) {
 		sum += p.value
 		stat.Min = math.Min(stat.Min, p.value)
 		stat.Max = math.Max(stat.Max, p.value)
+		stat.Bits |= uint64(p.value)
 	}
 	if count == 0 {
 		return Stat{}, 0, false

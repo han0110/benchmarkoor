@@ -57,8 +57,8 @@ var secondsCounters = set("node_cpu_seconds_total", "node_cpu_busy_seconds_total
 
 // statistic picks one named statistic out of a reduced metric, with the scale
 // it is stored at. A counter carries a total and a peak rate. A gauge carries
-// a mean, a minimum and a maximum. A name of the other kind reports nothing
-// rather than a zero.
+// a mean, a minimum, a maximum and its bits. A name of the other kind reports
+// nothing rather than a zero.
 func statistic(stat Stat, kind Kind, metric, name string) (float64, float64, bool) {
 	switch {
 	case kind == KindCounter && name == "total":
@@ -74,6 +74,8 @@ func statistic(stat Stat, kind Kind, metric, name string) (float64, float64, boo
 		return stat.Min, gaugeScale, true
 	case kind == KindGauge && name == "max":
 		return stat.Max, gaugeScale, true
+	case kind == KindGauge && name == "bits":
+		return float64(stat.Bits), 1, true
 	}
 
 	return 0, 0, false

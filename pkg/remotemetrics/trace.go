@@ -55,6 +55,8 @@ var traceColumns = map[string][]traceColumn{
 		{metric: "DCGM_FI_PROF_DRAM_ACTIVE", stat: "value"},
 		{metric: "DCGM_FI_DEV_GPU_TEMP", stat: "value"},
 		{metric: "DCGM_FI_DEV_GPU_TEMP_MARGIN_CELSIUS", stat: "value"},
+		{metric: "DCGM_FI_DEV_SM_CLOCK", stat: "value"},
+		{metric: "DCGM_FI_DEV_CLOCKS_EVENT_REASONS", stat: "value"},
 	},
 	ExporterNode: {
 		{metric: "node_cpu_busy_seconds_total", stat: "share", reference: "node_cpu_seconds_total"},

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useDeviceMetrics, useNodeMetrics } from '@/api/hooks/useRemoteMetrics'
 import { useTestRemoteMetrics } from '@/api/hooks/useTestRemoteMetrics'
+import { clockEventNames } from '@/utils/gpuMetrics'
 import { cpuCoreCounts, cpuUsageFigure } from '@/utils/nodeMetrics'
 import { higher, max } from '@/utils/remoteMetrics'
 import { frameBufferTotals, reduceBlockMetrics, reduceGpuTraces, reduceNodeTraces, tracePeak, type TraceSeries } from '@/utils/testMetrics'
@@ -77,6 +78,7 @@ export function TestRemoteMetrics({ runId, testName }: TestRemoteMetricsProps) {
     if (!gpu) return []
     const charts: TraceChart[] = [
       ['GPU Power (W)', gpu.power, (v) => `${v.toFixed(0)} W`],
+      ['SM Clock (MHz)', gpu.smClock, (v) => `${v.toFixed(0)} MHz`],
       ['SM Active %', gpu.smActive, percent, PERCENT_FLOOR],
       ['Integer Pipe Active %', gpu.intActive, percent, PERCENT_FLOOR],
       ['SM Occupancy %', gpu.smOccupancy, percent, PERCENT_FLOOR],
@@ -151,6 +153,9 @@ export function TestRemoteMetrics({ runId, testName }: TestRemoteMetricsProps) {
               {block.hasDuration && <StatCard label="Mean Throttled Time" value={`${figure(block.gpu.throttledShare, 1)}%`} />}
               <StatCard label="Min Temp Margin" value={`${figure(block.gpu.minTempMargin, 0)} °C`} />
               <StatCard label="PCIe Replays" value={figure(block.gpu.pcieReplays, 0)} />
+              {block.hasSmClock && <StatCard label="Mean SM Clock" value={`${figure(block.gpu.meanSmClock, 0)} MHz`} />}
+              {block.hasSmClock && <StatCard label="Min SM Clock" value={`${figure(block.gpu.minSmClock, 0)} MHz`} />}
+              {block.hasSmClock && <StatCard label="Clock Events" value={block.gpu.clockEvents === null ? 'n/a' : clockEventNames(block.gpu.clockEvents).join(', ') || 'none'} />}
             </>
           )}
         </>

@@ -44,6 +44,8 @@ var artifactColumns = map[string]map[string][]string{
 		"DCGM_FI_DEV_GPU_TEMP_MARGIN_CELSIUS":  {"min"},
 		"DCGM_FI_DEV_FB_USED":                  {"max"},
 		"DCGM_FI_DEV_FB_TOTAL":                 {"max"},
+		"DCGM_FI_DEV_SM_CLOCK":                 {"mean", "min"},
+		"DCGM_FI_DEV_CLOCKS_EVENT_REASONS":     {"bits"},
 	},
 	ExporterNode: {
 		"node_cpu_seconds_total":         {"total"},

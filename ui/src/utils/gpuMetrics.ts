@@ -40,7 +40,28 @@ export const COLUMN = {
   fbTotal: 'DCGM_FI_DEV_FB_TOTAL.max',
   gpuTemp: 'DCGM_FI_DEV_GPU_TEMP.max',
   tempMargin: 'DCGM_FI_DEV_GPU_TEMP_MARGIN_CELSIUS.min',
+  smClock: 'DCGM_FI_DEV_SM_CLOCK.mean',
+  smClockMin: 'DCGM_FI_DEV_SM_CLOCK.min',
+  clockEvents: 'DCGM_FI_DEV_CLOCKS_EVENT_REASONS.bits',
 } as const
+
+/**
+ * The clock event reasons DCGM reports as bits of one mask, in the order of
+ * the NVML mask. Idle and display clocks are left out, since neither lowers
+ * the clock of a loaded GPU.
+ */
+const CLOCK_EVENT_REASONS: [bit: number, name: string][] = [
+  [0x2, 'application clocks'],
+  [0x4, 'power cap'],
+  [0x8, 'HW slowdown'],
+  [0x10, 'sync boost'],
+  [0x20, 'SW thermal'],
+  [0x40, 'HW thermal'],
+  [0x80, 'power brake'],
+]
+
+/** The reasons set in a mask, by name. */
+export const clockEventNames = (bits: number) => CLOCK_EVENT_REASONS.flatMap(([bit, name]) => (bits & bit ? [name] : []))
 
 /**
  * GpuDataPoint holds one block reduced across every GPU that reported it.
@@ -79,6 +100,11 @@ export interface GpuDataPoint {
   tempMargin: number | null
   /** Temperature of the hottest GPU, which the margin reads against. */
   gpuTemp: number | null
+  smClock: number | null
+  /** Lowest clock of any GPU, which is how far the block was held below boost. */
+  slowestSmClock: number | null
+  /** Every clock event reason any GPU set during the block, as one mask. */
+  clockEvents: number | null
 }
 
 export interface GpuSummary {
@@ -99,6 +125,11 @@ export interface GpuSummary {
   /** Share of all GPU time in the run spent throttled, by power or by heat. */
   throttledShare: number | null
   pcieReplays: number | null
+  /** Mean SM clock over the blocks, each weighted by the time it took. */
+  meanSmClock: number | null
+  minSmClock: number | null
+  /** Every clock event reason any GPU set during the run, as one mask. */
+  clockEvents: number | null
 }
 
 export interface GpuMetricsView {
@@ -107,6 +138,7 @@ export interface GpuMetricsView {
   hasPower: boolean
   hasPcieRate: boolean
   hasDuration: boolean
+  hasSmClock: boolean
 }
 
 export type GpuReductionOptions = RemoteReductionOptions
@@ -132,11 +164,16 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
     minTempMargin: null,
     throttledShare: null,
     pcieReplays: null,
+    meanSmClock: null,
+    minSmClock: null,
+    clockEvents: null,
   }
   let smActiveTotal = 0
   let smActiveWeight = 0
   let wattsTotal = 0
   let wattsWeight = 0
+  let smClockTotal = 0
+  let smClockWeight = 0
   let throttledNs = 0
   let deviceNs = 0
 
@@ -172,6 +209,7 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
       )
       const rx = scaled(max(measured(rows, COLUMN.pcieRx)), 1e-9)
       const tx = scaled(max(measured(rows, COLUMN.pcieTx)), 1e-9)
+      const clockEvents = measured(rows, COLUMN.clockEvents)
 
       const point: GpuDataPoint = {
         testIndex: points.length + 1,
@@ -198,6 +236,9 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
         fbMarginGiB,
         tempMargin: min(measured(rows, COLUMN.tempMargin, GAUGE_SCALE)),
         gpuTemp: max(measured(rows, COLUMN.gpuTemp, GAUGE_SCALE)),
+        smClock: mean(measured(rows, COLUMN.smClock, GAUGE_SCALE)),
+        slowestSmClock: min(measured(rows, COLUMN.smClockMin, GAUGE_SCALE)),
+        clockEvents: clockEvents.length > 0 ? clockEvents.reduce((mask, bits) => mask | bits, 0) : null,
       }
       points.push(point)
 
@@ -210,11 +251,17 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
         wattsTotal += point.meanWatts * weight
         wattsWeight += weight
       }
+      if (point.smClock !== null) {
+        smClockTotal += point.smClock * weight
+        smClockWeight += weight
+      }
       summary.maxMeanSmActive = higher(summary.maxMeanSmActive, point.busiestSmActive)
       summary.peakWatts = higher(summary.peakWatts, point.peakWatts)
       summary.peakLink = higher(summary.peakLink, higher(rx, tx))
       summary.peakFbUsed = higher(summary.peakFbUsed, point.peakFbUsedGiB)
       summary.minTempMargin = lower(summary.minTempMargin, point.tempMargin)
+      summary.minSmClock = lower(summary.minSmClock, point.slowestSmClock)
+      if (point.clockEvents !== null) summary.clockEvents = (summary.clockEvents ?? 0) | point.clockEvents
       const replays = measured(rows, COLUMN.pcieReplay)
       if (replays.length > 0) summary.pcieReplays = (summary.pcieReplays ?? 0) + sum(replays)
 
@@ -233,6 +280,7 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
 
   if (smActiveWeight > 0) summary.meanSmActive = smActiveTotal / smActiveWeight
   if (wattsWeight > 0) summary.meanWatts = wattsTotal / wattsWeight
+  if (smClockWeight > 0) summary.meanSmClock = smClockTotal / smClockWeight
   if (deviceNs > 0) {
     summary.throttledShare = (throttledNs / deviceNs) * 100
   }
@@ -243,5 +291,6 @@ export function reduceGpuMetrics(metrics: DeviceMetrics, options: GpuReductionOp
     hasPower: has(COLUMN.powerLimit),
     hasPcieRate: has(COLUMN.pcieRx),
     hasDuration: has(LEADING.durationMs),
+    hasSmClock: has(COLUMN.smClock),
   }
 }

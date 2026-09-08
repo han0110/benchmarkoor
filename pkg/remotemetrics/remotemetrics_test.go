@@ -86,6 +86,14 @@ func TestGaugeKeepsBothTails(t *testing.T) {
 	assert.InDelta(t, 0.9, stat.Max, 0.001)
 }
 
+// TestGaugeUnitesTheBitsOfEveryReading is what a bitmask needs, since a mean
+// or a maximum of two masks names a reason neither reading set.
+func TestGaugeUnitesTheBitsOfEveryReading(t *testing.T) {
+	stat, _, ok := gaugeStat(points(4, 0, 8, 4), at(0), at(300))
+	require.True(t, ok)
+	assert.Equal(t, uint64(12), stat.Bits)
+}
+
 // TestUpdatesCountsSourceRefreshesNotScrapes is the in-band resolution meter.
 // DCGM can drop its profiling refresh to 1 Hz while the scraper still polls at
 // 10 Hz, and the repeated rows are identical, so only counting value changes
@@ -312,7 +320,7 @@ func TestArtifactListsEachDeviceOnce(t *testing.T) {
 // from carrying a column nothing renders. Every statistic the page names must
 // be written, and every statistic written must be named by the page.
 func TestArtifactCarriesOnlyTheStatisticsTheResultsPageReads(t *testing.T) {
-	pattern := regexp.MustCompile(`(?:DCGM_FI_[A-Z0-9_]+|node_[A-Za-z0-9_]+)\.(?:total|rate_max|mean|min|max)`)
+	pattern := regexp.MustCompile(`(?:DCGM_FI_[A-Z0-9_]+|node_[A-Za-z0-9_]+)\.(?:total|rate_max|mean|min|max|bits)`)
 
 	for exporter, file := range map[string]string{ExporterDCGM: "gpuMetrics.ts", ExporterNode: "nodeMetrics.ts"} {
 		source, err := os.ReadFile(filepath.Join("..", "..", "ui", "src", "utils", file))
@@ -526,7 +534,7 @@ func TestScrapeDropsAMetricOutsideTheArtifact(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = w.Write([]byte(
-			"# TYPE DCGM_FI_DEV_CLOCKS_EVENT_REASONS gauge\nDCGM_FI_DEV_CLOCKS_EVENT_REASONS{gpu=\"0\"} 4\n" +
+			"# TYPE DCGM_FI_DEV_MEM_CLOCK gauge\nDCGM_FI_DEV_MEM_CLOCK{gpu=\"0\"} 14001\n" +
 				"# TYPE DCGM_FI_PROF_DRAM_ACTIVE gauge\nDCGM_FI_PROF_DRAM_ACTIVE{gpu=\"0\"} 0.5\n"))
 	}))
 	defer server.Close()
@@ -534,7 +542,7 @@ func TestScrapeDropsAMetricOutsideTheArtifact(t *testing.T) {
 	scraper := NewScraper([]Endpoint{{Exporter: ExporterDCGM, URL: server.URL, Labels: map[string]string{"node": "node0"}}}, time.Second, time.Second)
 	require.NoError(t, scraper.scrape(context.Background(), scraper.endpoints[0]))
 
-	assert.Empty(t, scraper.points[series{metric: "DCGM_FI_DEV_CLOCKS_EVENT_REASONS", device: "node=node0,gpu=0"}],
+	assert.Empty(t, scraper.points[series{metric: "DCGM_FI_DEV_MEM_CLOCK", device: "node=node0,gpu=0"}],
 		"a metric outside the artifact was buffered")
 	assert.Len(t, scraper.points[series{metric: "DCGM_FI_PROF_DRAM_ACTIVE", device: "node=node0,gpu=0"}], 1)
 }

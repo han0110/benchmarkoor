@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { DeviceMetrics } from '@/api/types'
-import { COLUMN, GAUGE_SCALE, reduceGpuMetrics } from './gpuMetrics'
+import { COLUMN, GAUGE_SCALE, clockEventNames, reduceGpuMetrics } from './gpuMetrics'
 
 const columns = [
   'device',
@@ -24,6 +24,9 @@ const columns = [
   COLUMN.tempMargin,
   COLUMN.fbUsed,
   COLUMN.fbTotal,
+  COLUMN.smClock,
+  COLUMN.smClockMin,
+  COLUMN.clockEvents,
 ]
 
 type Row = Array<number | null>
@@ -38,7 +41,8 @@ function withCells(source: Row, cells: Record<string, number | null>): Row {
 }
 
 // One GPU proving for a second at 80 percent SM activity, a quarter of it
-// throttled by the power cap, beside one GPU that sat idle.
+// throttled by the power cap and held down to 2200 MHz, beside one GPU that
+// sat idle at 225 MHz.
 const busy = row({
   device: 0,
   scrapes: 10,
@@ -61,6 +65,9 @@ const busy = row({
   [COLUMN.tempMargin]: 10 * GAUGE_SCALE,
   [COLUMN.fbUsed]: 30720 * GAUGE_SCALE,
   [COLUMN.fbTotal]: 32768 * GAUGE_SCALE,
+  [COLUMN.smClock]: 2500 * GAUGE_SCALE,
+  [COLUMN.smClockMin]: 2200 * GAUGE_SCALE,
+  [COLUMN.clockEvents]: 0x4,
 })
 
 const idle = row({
@@ -85,6 +92,9 @@ const idle = row({
   [COLUMN.tempMargin]: 40 * GAUGE_SCALE,
   [COLUMN.fbUsed]: 1024 * GAUGE_SCALE,
   [COLUMN.fbTotal]: 32768 * GAUGE_SCALE,
+  [COLUMN.smClock]: 300 * GAUGE_SCALE,
+  [COLUMN.smClockMin]: 225 * GAUGE_SCALE,
+  [COLUMN.clockEvents]: 0x1,
 })
 
 const metrics: DeviceMetrics = {
@@ -132,6 +142,19 @@ describe('reduceGpuMetrics', () => {
     expect(point.meanFbUsedGiB).toBeCloseTo(15.5)
     expect(point.peakFbUsedGiB).toBeCloseTo(30)
     expect(point.fbMarginGiB).toBeCloseTo(2)
+  })
+
+  it('reads the clock of the rig and of its slowest GPU, with every reason any GPU set', () => {
+    const { dataPoints, summary, hasSmClock } = reduceGpuMetrics(metrics)
+    const point = dataPoints.find((p) => p.testName === 'b.json')!
+
+    expect(hasSmClock).toBe(true)
+    expect(point.smClock).toBeCloseTo(1400)
+    expect(point.slowestSmClock).toBeCloseTo(225)
+    expect(point.clockEvents).toBe(0x5)
+    expect(summary.meanSmClock).toBeCloseTo(1950)
+    expect(summary.minSmClock).toBeCloseTo(225)
+    expect(clockEventNames(summary.clockEvents!)).toEqual(['power cap'])
   })
 
   it('reads the headroom of each GPU against its own frame buffer', () => {
@@ -292,6 +315,8 @@ describe('reduceGpuMetrics', () => {
     expect(view.dataPoints[0].meanWatts).toBeNull()
     expect(view.summary.throttledShare).toBeNull()
     expect(view.summary.meanWatts).toBeNull()
+    expect(view.hasSmClock).toBe(false)
+    expect(view.summary.clockEvents).toBeNull()
   })
 
   it('leaves the replay count unmeasured when no row carries it', () => {

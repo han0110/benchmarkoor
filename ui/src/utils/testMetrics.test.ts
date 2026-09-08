@@ -36,6 +36,8 @@ const busy = row(gpuColumns, {
   [TRACE_COLUMN.dramActive]: 0.4 * GAUGE_SCALE,
   [TRACE_COLUMN.gpuTemp]: 80 * GAUGE_SCALE,
   [TRACE_COLUMN.tempMargin]: 10 * GAUGE_SCALE,
+  [TRACE_COLUMN.smClock]: 2200 * GAUGE_SCALE,
+  [TRACE_COLUMN.clockEvents]: 0x4 * GAUGE_SCALE,
 })
 const idle = row(gpuColumns, {
   at_ms: 2000,
@@ -51,6 +53,8 @@ const idle = row(gpuColumns, {
   [TRACE_COLUMN.dramActive]: 0,
   [TRACE_COLUMN.gpuTemp]: 50 * GAUGE_SCALE,
   [TRACE_COLUMN.tempMargin]: 40 * GAUGE_SCALE,
+  [TRACE_COLUMN.smClock]: 225 * GAUGE_SCALE,
+  [TRACE_COLUMN.clockEvents]: 0x1 * GAUGE_SCALE,
 })
 
 const gpuExporter: TestRemoteMetricsExporter = {
@@ -89,6 +93,14 @@ describe('reduceGpuTraces', () => {
 
     expect(traces.tempMargin![0].detail).toEqual(['at 50 °C'])
     expect(traces.tempMargin![1].detail).toEqual([null, 'at 80 °C'])
+  })
+
+  it('names the clock events of the same sample on the clock tooltip', () => {
+    const traces = reduceGpuTraces(gpuExporter)
+
+    expect(traces.smClock![1].data[1]).toEqual([1.5, 2200])
+    expect(traces.smClock![0].detail).toEqual(['no event'])
+    expect(traces.smClock![1].detail).toEqual([null, 'power cap'])
   })
 
   it('leaves the margin tooltip alone when the file carries no temperature', () => {

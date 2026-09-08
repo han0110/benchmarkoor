@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { reduceGpuMetrics, type GpuDataPoint } from '@/utils/gpuMetrics'
+import { clockEventNames, reduceGpuMetrics, type GpuDataPoint } from '@/utils/gpuMetrics'
 import { NO_METRICS } from '@/utils/remoteMetrics'
 import { useNameDisplayMode } from '@/hooks/useNameDisplayMode'
 import { ChartSection, StatCard } from './RemoteMetricsPanel'
@@ -32,7 +32,7 @@ export function useGpuMetricsSection({
   const { mode: nameMode } = useNameDisplayMode()
   const includeTest = useStatusFilter(tests, statusFilter)
 
-  const { dataPoints, summary, hasPower, hasPcieRate, hasDuration } = useMemo(
+  const { dataPoints, summary, hasPower, hasPcieRate, hasDuration, hasSmClock } = useMemo(
     () => reduceGpuMetrics(metrics ?? NO_METRICS, { suiteTests, searchQuery, includeTest }),
     [metrics, suiteTests, searchQuery, includeTest],
   )
@@ -90,6 +90,13 @@ export function useGpuMetricsSection({
         [{ name: 'Temp Margin', color: '#ef4444', value: (p) => p.tempMargin, detail: (p) => (p.gpuTemp === null ? null : `GPU at ${celsius(p.gpuTemp)}`) }],
         celsius,
       ),
+      clockOption: makeOption(
+        [
+          { name: 'Mean per GPU', color: '#0ea5e9', value: (p) => p.smClock },
+          { name: 'Slowest GPU', color: '#dc2626', value: (p) => p.slowestSmClock, detail: (p) => (p.clockEvents === null ? null : clockEventNames(p.clockEvents).join(', ') || 'no event') },
+        ],
+        (v) => `${v.toFixed(0)} MHz`,
+      ),
     }
   }, [makeOption, summary])
 
@@ -117,11 +124,15 @@ export function useGpuMetricsSection({
         {hasDuration && <StatCard label="Mean Throttled Time" value={`${figure(summary.throttledShare, 1)}%`} />}
         <StatCard label="Min Temp Margin" value={`${figure(summary.minTempMargin, 0)} °C`} />
         <StatCard label="PCIe Replays" value={figure(summary.pcieReplays, 0)} />
+        {hasSmClock && <StatCard label="Mean SM Clock" value={`${figure(summary.meanSmClock, 0)} MHz`} />}
+        {hasSmClock && <StatCard label="Min SM Clock" value={`${figure(summary.minSmClock, 0)} MHz`} />}
+        {hasSmClock && <StatCard label="Clock Events" value={summary.clockEvents === null ? 'n/a' : clockEventNames(summary.clockEvents).join(', ') || 'none'} />}
       </>
     ),
     charts: (
       <>
         {hasPower && chart('GPU Power (W)', chartOptions.powerOption)}
+        {hasSmClock && chart('SM Clock (MHz)', chartOptions.clockOption)}
         {chart('SM Active %', chartOptions.smActiveOption)}
         {chart('Integer Pipe Active %', chartOptions.intOption)}
         {chart('SM Occupancy %', chartOptions.occupancyOption)}

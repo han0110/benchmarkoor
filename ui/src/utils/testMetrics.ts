@@ -1,5 +1,5 @@
 import type { DeviceMetricDevice, DeviceMetrics, TestRemoteMetricsExporter } from '@/api/types'
-import { COLUMN, reduceGpuMetrics, type GpuSummary } from './gpuMetrics'
+import { COLUMN, clockEventNames, reduceGpuMetrics, type GpuSummary } from './gpuMetrics'
 import { reduceNodeMetrics, type NodeSummary } from './nodeMetrics'
 import { GAUGE_SCALE, LEADING, NO_METRICS, columnReader, host, max, mean } from './remoteMetrics'
 
@@ -23,6 +23,8 @@ export const TRACE_COLUMN = {
   dramActive: 'DCGM_FI_PROF_DRAM_ACTIVE.value',
   gpuTemp: 'DCGM_FI_DEV_GPU_TEMP.value',
   tempMargin: 'DCGM_FI_DEV_GPU_TEMP_MARGIN_CELSIUS.value',
+  smClock: 'DCGM_FI_DEV_SM_CLOCK.value',
+  clockEvents: 'DCGM_FI_DEV_CLOCKS_EVENT_REASONS.value',
 } as const
 
 /** Every metric column the node traces read, under the same contract. */
@@ -65,6 +67,7 @@ export interface GpuTraces {
   pcieTx?: TraceSeries[]
   throttled?: TraceSeries[]
   tempMargin?: TraceSeries[]
+  smClock?: TraceSeries[]
 }
 
 export interface NodeTraces {
@@ -202,6 +205,9 @@ export function reduceGpuTraces(exporter: TestRemoteMetricsExporter, fbTotalGiB:
     // A margin reads against the temperature the same sample measured, which
     // the tooltip names and no chart plots.
     tempMargin: annotate(trace([TRACE_COLUMN.tempMargin], gauge), trace([TRACE_COLUMN.gpuTemp], gauge), (temperature) => `at ${temperature.toFixed(0)} °C`),
+    // A clock reads beside the reasons the same sample set, which the
+    // tooltip names and no chart plots.
+    smClock: annotate(trace([TRACE_COLUMN.smClock], gauge), trace([TRACE_COLUMN.clockEvents], gauge), (bits) => clockEventNames(bits).join(', ') || 'no event'),
   }
 }
 
@@ -251,6 +257,7 @@ export interface BlockMetrics {
   hasPower: boolean
   hasPcieRate: boolean
   hasDuration: boolean
+  hasSmClock: boolean
 }
 
 export function reduceBlockMetrics(
@@ -268,6 +275,7 @@ export function reduceBlockMetrics(
     hasPower: gpu.hasPower,
     hasPcieRate: gpu.hasPcieRate,
     hasDuration: gpu.hasDuration,
+    hasSmClock: gpu.hasSmClock,
   }
 }
 
