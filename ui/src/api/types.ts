@@ -639,6 +639,9 @@ export interface SourceInfo {
     local_genesis_dir?: string
     local_fixtures_tarball?: string
     local_genesis_tarball?: string
+    r2_bucket_url?: string
+    r2_bucket_starting_block?: number
+    r2_bucket_blocks?: number
   }
 }
 

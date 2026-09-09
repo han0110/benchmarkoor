@@ -257,6 +257,18 @@ runner:
     #     #   local_genesis_tarball: /home/user/eest-output/benchmark_genesis.tar.gz
     #     #   # fixtures_subdir also works with local tarballs
     #
+    #     # Option 4e: EEST fixtures from an R2 bucket (a stateless inputs catalog).
+    #     # The bucket serves manifest.json, which names a batch index, and every
+    #     # batch is a tar.zst archive of consecutive live blocks. Only the batches
+    #     # covering r2_bucket_blocks heights from r2_bucket_starting_block are
+    #     # downloaded, every height must have a fixture, and a reorged height
+    #     # contributes only the block in its latest slot.
+    #     # eest_fixtures:
+    #     #   r2_bucket_url: https://pub-760ad8b3dd9547539f829c1ea30f18b5.r2.dev/devnets/glamsterdam-devnet-8
+    #     #   r2_bucket_starting_block: 100000
+    #     #   r2_bucket_blocks: 1000
+    #     #   # fixtures_subdir: blockchain_tests  # default for this mode
+    #
     #   # Optional: External opcode metadata for the test suite.
     #   # A JSON file mapping test names to opcode counts: {"test_name": {"OPCODE": count, ...}}
     #   # Two modes:

@@ -84,6 +84,12 @@ func (s *EESTSource) Prepare(ctx context.Context) (*PreparedSource, error) {
 		return s.prepareFromURL(ctx)
 	}
 
+	// Handle R2 bucket mode, a batched catalog of live blocks. Downloads only
+	// the batches covering the configured block range, and no genesis.
+	if s.cfg.UseR2Bucket() {
+		return s.prepareFromR2Bucket(ctx)
+	}
+
 	// Build cache path based on source type.
 	repoHash := hashRepoURL(s.cfg.GitHubRepo)
 
@@ -1153,6 +1159,9 @@ func (s *EESTSource) GetSourceInfo() (*SuiteSource, error) {
 			LocalGenesisDir:       s.cfg.LocalGenesisDir,
 			LocalFixturesTarball:  s.cfg.LocalFixturesTarball,
 			LocalGenesisTarball:   s.cfg.LocalGenesisTarball,
+			R2BucketURL:           s.cfg.R2BucketURL,
+			R2BucketStartingBlock: s.cfg.R2BucketStartingBlock,
+			R2BucketBlocks:        s.cfg.R2BucketBlocks,
 		},
 	}, nil
 }
@@ -1357,4 +1366,8 @@ type EESTSourceInfo struct {
 	LocalGenesisDir      string `json:"local_genesis_dir,omitempty"`
 	LocalFixturesTarball string `json:"local_fixtures_tarball,omitempty"`
 	LocalGenesisTarball  string `json:"local_genesis_tarball,omitempty"`
+	// R2 bucket fields.
+	R2BucketURL           string `json:"r2_bucket_url,omitempty"`
+	R2BucketStartingBlock uint64 `json:"r2_bucket_starting_block,omitempty"`
+	R2BucketBlocks        uint64 `json:"r2_bucket_blocks,omitempty"`
 }

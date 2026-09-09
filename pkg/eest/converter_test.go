@@ -618,7 +618,8 @@ func TestEngineNewPayload_UnmarshalJSON(t *testing.T) {
 	assert.Empty(t, payload.ExecutionRequests)
 }
 
-// Fixtures taken from the tests-zkevm-benchmark v0.6.2 release under
+// empty_block.json and parallel_execution_serial_chain.json are taken from the
+// tests-zkevm-benchmark v0.6.2 release under
 // blockchain_tests/for_amsterdam_at_0001M/compute, reduced to the keys the
 // fixture structs declare. Dropping the pre state, RLP and witnesses leaves
 // every value unmodified, so these parse to the same Fixture the upstream
@@ -636,6 +637,14 @@ const (
 		"test_parallel_execution_serial_chain[fork_Amsterdam-blockchain_test-benchmark-gas-value_1M]"
 	serialChainSetupBlockHash     = "0x5decc4bfc0ec143855b3713965a68271cc7369eb6438838933648693911e08b7"
 	serialChainBenchmarkBlockHash = "0xc741905560dce0e9b885f372d6113370260f0339ab84f529c1c6950de6bad0b3"
+
+	// witness_generator_block.json is block 93300 of glamsterdam-devnet-8 from
+	// the stateless inputs catalog, with statelessInputBytes truncated. The
+	// witness generator writes no fixture-format and no header hash.
+	witnessGeneratorFixtureFile = "witness_generator_block.json"
+	witnessGeneratorFixtureName = "witness-generator-spec-cli::" +
+		"block_93300_70c0d887532abdc5414f879c6d788ddeaf797b574d3e9df577f3bfb078f1649c"
+	witnessGeneratorBlockHash = "0x70c0d887532abdc5414f879c6d788ddeaf797b574d3e9df577f3bfb078f1649c"
 )
 
 // loadTestdataFixture parses a vendored fixture file and returns its single
@@ -799,4 +808,33 @@ func TestStatelessOpcodeCount_LengthMismatch(t *testing.T) {
 	}
 
 	assert.Nil(t, fixture.StatelessOpcodeCount())
+}
+
+// TestConvertStatelessFixture_WitnessGenerator covers a catalog fixture, which
+// declares its format only through _info.metadata.witness_generator and keeps
+// the block hash there instead of in the header.
+func TestConvertStatelessFixture_WitnessGenerator(t *testing.T) {
+	fixture := loadTestdataFixture(t, witnessGeneratorFixtureFile, witnessGeneratorFixtureName)
+
+	require.True(t, fixture.IsStateless())
+	require.True(t, fixture.IsSupportedFormat())
+	require.False(t, fixture.IsStateful())
+	require.Len(t, fixture.Blocks, 1)
+	assert.Empty(t, fixture.Blocks[0].BlockHeader.Hash)
+
+	converted, err := ConvertStatelessFixture(witnessGeneratorFixtureName, fixture)
+	require.NoError(t, err)
+
+	assert.Equal(t, witnessGeneratorBlockHash, converted.FinalHash)
+	require.Len(t, converted.TestLines, 1)
+
+	call := decodeStatelessCall(t, converted.TestLines[0])
+	assert.Equal(t, "engine_proveStatelessValidator", call.Method)
+	assert.Equal(t, witnessGeneratorBlockHash, call.Params[0]["blockHash"])
+	assert.Equal(t, "0x16c74", call.Params[0]["blockNumber"])
+	assert.Equal(t, "0x6300bbe", call.Params[0]["gasUsed"])
+	assertHexEqual(t, fixture.Blocks[0].StatelessInputBytes, call.Params[0]["statelessInput"], "statelessInput")
+
+	assert.Nil(t, fixture.StatelessOpcodeCount())
+	assert.Equal(t, uint64(95822), fixture.Info.Metadata.WitnessGenerator.SlotNumber)
 }

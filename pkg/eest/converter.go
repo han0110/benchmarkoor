@@ -163,8 +163,9 @@ func ConvertStatelessFixture(name string, fixture *Fixture) (*ConvertedTest, err
 		return nil, fmt.Errorf("last block has statelessInputBytes but no statelessOutputBytes")
 	}
 
-	if block.BlockHeader == nil || block.BlockHeader.Hash == "" {
-		return nil, fmt.Errorf("last block has no header hash")
+	blockHash := fixture.StatelessBlockHash()
+	if block.BlockHeader == nil || blockHash == "" {
+		return nil, fmt.Errorf("last block has no block hash")
 	}
 
 	// blockHash, blockNumber and gasUsed carry the Engine API names so the
@@ -172,7 +173,7 @@ func ConvertStatelessFixture(name string, fixture *Fixture) (*ConvertedTest, err
 	// engine_newPayload call. gasUsed is what MGas/s is computed from, and
 	// blockHash is how emitted block logs match back to their test.
 	payload := map[string]string{
-		"blockHash":               block.BlockHeader.Hash,
+		"blockHash":               blockHash,
 		"blockNumber":             block.BlockHeader.Number,
 		"gasUsed":                 block.BlockHeader.GasUsed,
 		"statelessInput":          block.StatelessInputBytes,
@@ -195,7 +196,7 @@ func ConvertStatelessFixture(name string, fixture *Fixture) (*ConvertedTest, err
 		Name:         name,
 		SetupLines:   make([]string, 0),
 		TestLines:    []string{string(data)},
-		FinalHash:    block.BlockHeader.Hash,
+		FinalHash:    blockHash,
 		PayloadCount: 1,
 	}, nil
 }

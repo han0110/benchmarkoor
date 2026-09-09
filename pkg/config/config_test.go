@@ -656,6 +656,29 @@ runner:
 	assert.Equal(t, DefaultPullPolicy, cfg.Runner.Instances[0].PullPolicy)
 }
 
+func TestLoad_R2BucketFixturesSubdirDefault(t *testing.T) {
+	configContent := `
+runner:
+  benchmark:
+    tests:
+      source:
+        eest_fixtures:
+          r2_bucket_url: https://example.r2.dev/devnets/devnet-8
+          r2_bucket_starting_block: 100000
+          r2_bucket_blocks: 1000
+  instances:
+    - id: test-instance
+      client: provoor
+`
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o644))
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, DefaultR2BucketFixturesSubdir, cfg.Runner.Benchmark.Tests.Source.EESTFixtures.FixturesSubdir)
+}
+
 func TestLoad_EnvVarOverridesDefaults(t *testing.T) {
 	// Create a minimal config without log_level set.
 	configContent := `
@@ -943,6 +966,52 @@ func TestSourceConfig_Validate(t *testing.T) {
 					FixturesArtifactName: "fixtures_benchmark",
 					LocalFixturesTarball: fixturesTarball,
 					LocalGenesisTarball:  genesisTarball,
+				},
+			},
+			wantErr:   true,
+			errSubstr: "cannot combine modes",
+		},
+		{
+			name: "valid eest_fixtures with r2 bucket",
+			source: SourceConfig{
+				EESTFixtures: &EESTFixturesSource{
+					R2BucketURL:           "https://example.r2.dev/devnets/devnet-8",
+					R2BucketStartingBlock: 93300,
+					R2BucketBlocks:        100,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "eest_fixtures r2 bucket missing r2_bucket_starting_block",
+			source: SourceConfig{
+				EESTFixtures: &EESTFixturesSource{
+					R2BucketURL:    "https://example.r2.dev/devnets/devnet-8",
+					R2BucketBlocks: 100,
+				},
+			},
+			wantErr:   true,
+			errSubstr: "r2_bucket_starting_block is required",
+		},
+		{
+			name: "eest_fixtures r2 bucket missing r2_bucket_blocks",
+			source: SourceConfig{
+				EESTFixtures: &EESTFixturesSource{
+					R2BucketURL:           "https://example.r2.dev/devnets/devnet-8",
+					R2BucketStartingBlock: 93300,
+				},
+			},
+			wantErr:   true,
+			errSubstr: "r2_bucket_blocks must be at least 1",
+		},
+		{
+			name: "eest_fixtures r2 bucket cannot mix with release",
+			source: SourceConfig{
+				EESTFixtures: &EESTFixturesSource{
+					GitHubRepo:     "ethereum/execution-spec-tests",
+					GitHubRelease:  "benchmark@v0.0.6",
+					R2BucketURL:    "https://example.r2.dev/devnets/devnet-8",
+					R2BucketBlocks: 100,
 				},
 			},
 			wantErr:   true,

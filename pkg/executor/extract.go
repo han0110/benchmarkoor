@@ -5,6 +5,8 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/sirupsen/logrus"
 )
 
@@ -141,6 +144,82 @@ func extractTarGzFile(tarballPath, targetDir string) error {
 	}
 
 	return nil
+}
+
+// extractTarZstFile extracts the regular files of a .tar.zst archive that keep
+// accepts, by entry name, to the target directory.
+func extractTarZstFile(archivePath, targetDir string, keep func(name string) bool) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("opening archive: %w", err)
+	}
+
+	defer func() { _ = f.Close() }()
+
+	zr, err := zstd.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("creating zstd reader: %w", err)
+	}
+
+	defer zr.Close()
+
+	tr := tar.NewReader(zr)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+
+		if err != nil {
+			return fmt.Errorf("reading tar: %w", err)
+		}
+
+		if header.Typeflag != tar.TypeReg || !keep(header.Name) {
+			continue
+		}
+
+		target := filepath.Join(targetDir, filepath.Clean(header.Name))
+		if !strings.HasPrefix(target, filepath.Clean(targetDir)+string(os.PathSeparator)) {
+			return fmt.Errorf("invalid tar entry: %s", header.Name)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return fmt.Errorf("creating parent directory: %w", err)
+		}
+
+		outFile, err := os.OpenFile(
+			target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode),
+		)
+		if err != nil {
+			return fmt.Errorf("creating file: %w", err)
+		}
+
+		if _, err := io.Copy(outFile, tr); err != nil {
+			_ = outFile.Close()
+
+			return fmt.Errorf("extracting file: %w", err)
+		}
+
+		_ = outFile.Close()
+	}
+}
+
+// fileSHA256 returns the hex digest of a file.
+func fileSHA256(filePath string) (string, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("opening file for hashing: %w", err)
+	}
+
+	defer func() { _ = f.Close() }()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("hashing %s: %w", filePath, err)
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // extractInnerTarballs finds .tar.gz files in the directory, extracts them

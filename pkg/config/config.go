@@ -902,6 +902,10 @@ type EESTFixturesSource struct {
 	// Local tarball support (.tar.gz files).
 	LocalFixturesTarball string `yaml:"local_fixtures_tarball,omitempty" mapstructure:"local_fixtures_tarball"`
 	LocalGenesisTarball  string `yaml:"local_genesis_tarball,omitempty" mapstructure:"local_genesis_tarball"`
+	// R2 bucket support (a stateless inputs catalog of live blocks).
+	R2BucketURL           string `yaml:"r2_bucket_url,omitempty" mapstructure:"r2_bucket_url"`
+	R2BucketStartingBlock uint64 `yaml:"r2_bucket_starting_block,omitempty" mapstructure:"r2_bucket_starting_block"`
+	R2BucketBlocks        uint64 `yaml:"r2_bucket_blocks,omitempty" mapstructure:"r2_bucket_blocks"`
 	// PreRuns points at a builder.pre_runs bundle (engine_newPayload/
 	// forkchoiceUpdated request lines advancing a raw snapshot to the setup head).
 	// The runner replays it once per instance, before the benchmark fixtures, so
@@ -969,6 +973,11 @@ func (e *EESTFixturesSource) UseFixturesURL() bool {
 	return e.FixturesURL != "" && e.GitHubRelease == ""
 }
 
+// UseR2Bucket returns true if the source is configured to use an R2 bucket.
+func (e *EESTFixturesSource) UseR2Bucket() bool {
+	return e.R2BucketURL != ""
+}
+
 // validate checks the EEST fixtures source configuration for errors.
 // Exactly one mode must be specified: release, artifact, local_dir, or local_tarball.
 func (e *EESTFixturesSource) validate() error {
@@ -977,6 +986,7 @@ func (e *EESTFixturesSource) validate() error {
 	hasLocalDir := e.UseLocalDir()
 	hasLocalTarball := e.UseLocalTarball()
 	hasFixturesURL := e.UseFixturesURL()
+	hasR2Bucket := e.UseR2Bucket()
 
 	// Count active modes.
 	modeCount := 0
@@ -1000,19 +1010,24 @@ func (e *EESTFixturesSource) validate() error {
 		modeCount++
 	}
 
+	if hasR2Bucket {
+		modeCount++
+	}
+
 	if modeCount == 0 {
 		return fmt.Errorf(
 			"eest_fixtures: must specify one of: github_release, " +
 				"fixtures_url, fixtures_artifact_name, " +
 				"local_fixtures_dir/local_genesis_dir, " +
-				"or local_fixtures_tarball/local_genesis_tarball",
+				"local_fixtures_tarball/local_genesis_tarball, " +
+				"or r2_bucket_url",
 		)
 	}
 
 	if modeCount > 1 {
 		return fmt.Errorf(
 			"eest_fixtures: cannot combine modes (release, fixtures_url, " +
-				"artifact, local_dir, local_tarball are mutually exclusive)",
+				"artifact, local_dir, local_tarball, r2_bucket are mutually exclusive)",
 		)
 	}
 
@@ -1060,6 +1075,17 @@ func (e *EESTFixturesSource) validate() error {
 		}
 	}
 
+	// Validate R2 bucket mode.
+	if hasR2Bucket {
+		if e.R2BucketStartingBlock == 0 {
+			return fmt.Errorf("eest_fixtures.r2_bucket_starting_block is required")
+		}
+
+		if e.R2BucketBlocks == 0 {
+			return fmt.Errorf("eest_fixtures.r2_bucket_blocks must be at least 1")
+		}
+	}
+
 	return nil
 }
 
@@ -1101,6 +1127,10 @@ func validateFileExists(path, field string) error {
 
 // DefaultEESTFixturesSubdir is the default subdirectory within the fixtures tarball.
 const DefaultEESTFixturesSubdir = "fixtures/blockchain_tests_engine_x"
+
+// DefaultR2BucketFixturesSubdir is the default subdirectory within an R2 bucket
+// batch archive.
+const DefaultR2BucketFixturesSubdir = "blockchain_tests"
 
 // GitSourceV2 defines a git repository source for tests with step-based structure.
 type GitSourceV2 struct {
@@ -2159,6 +2189,11 @@ func (c *Config) applyDefaults() {
 
 	if c.Runner.Client.Config.Genesis == nil {
 		c.Runner.Client.Config.Genesis = make(map[string]string, 6)
+	}
+
+	if eest := c.Runner.Benchmark.Tests.Source.EESTFixtures; eest != nil &&
+		eest.UseR2Bucket() && eest.FixturesSubdir == "" {
+		eest.FixturesSubdir = DefaultR2BucketFixturesSubdir
 	}
 
 	if c.Runner.Benchmark.ResultsUpload != nil &&

@@ -131,6 +131,10 @@ function SourceTypeBadge({ source }: { source: SourceInfo }) {
     return <Badge variant="info">Archive</Badge>
   }
 
+  if (source.eest?.r2_bucket_url) {
+    return <Badge variant="success">EEST R2 Bucket</Badge>
+  }
+
   if (source.eest) {
     const hasArtifacts =
       source.eest.fixtures_artifact_name || source.eest.genesis_artifact_name
@@ -376,6 +380,29 @@ export function SuiteSource({ title, source }: SuiteSourceProps) {
                   </dd>
                 </div>
               )}
+            </dl>
+          )}
+          {eest.r2_bucket_url && (
+            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <dt className="text-xs/5 font-medium text-gray-500 dark:text-gray-400">R2 Bucket URL</dt>
+                <dd className="mt-1 break-all text-sm/6">
+                  <a
+                    href={eest.r2_bucket_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    {eest.r2_bucket_url}
+                  </a>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs/5 font-medium text-gray-500 dark:text-gray-400">Block Range</dt>
+                <dd className="mt-1 font-mono text-sm/6 text-gray-900 dark:text-gray-100">
+                  {eest.r2_bucket_starting_block}-{(eest.r2_bucket_starting_block ?? 0) + (eest.r2_bucket_blocks ?? 0) - 1} ({eest.r2_bucket_blocks} blocks)
+                </dd>
+              </div>
             </dl>
           )}
           {hasArtifacts && (

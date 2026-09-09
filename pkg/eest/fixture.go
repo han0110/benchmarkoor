@@ -90,6 +90,17 @@ type FixtureMetadata struct {
 	OpcodeCounts        []map[string]int `json:"opcode_counts,omitempty"`
 	OpcodeCountPerBlock []map[string]int `json:"opcode_count_per_block,omitempty"`
 	TargetOpcode        string           `json:"target_opcode,omitempty"`
+	// WitnessGenerator is written by the stateless inputs catalog in place of
+	// fixture-format. Its fixtures are blockchain tests of one live block whose
+	// header omits the hash, so the hash is read from here.
+	WitnessGenerator *WitnessGeneratorMetadata `json:"witness_generator,omitempty"`
+}
+
+// WitnessGeneratorMetadata identifies the block a catalog fixture was collected
+// from. The slot orders the blocks a reorged height carries.
+type WitnessGeneratorMetadata struct {
+	BlockHash  string `json:"blockHash"`
+	SlotNumber uint64 `json:"slotNumber"`
 }
 
 // AggregatedOpcodeCount returns the fixture's per-opcode execution counts as a
@@ -134,7 +145,7 @@ func (f *Fixture) IsSupportedFormat() bool {
 
 	return f.Info.FixtureFormat == SupportedFixtureFormat ||
 		f.Info.FixtureFormat == SupportedStatefulFixtureFormat ||
-		f.Info.FixtureFormat == SupportedStatelessFixtureFormat
+		f.IsStateless()
 }
 
 // IsStateful reports whether the fixture uses the stateful-engine format, which
@@ -144,9 +155,34 @@ func (f *Fixture) IsStateful() bool {
 }
 
 // IsStateless reports whether the fixture uses the blockchain-test format
-// whose blocks may carry stateless validation bytes.
+// whose blocks may carry stateless validation bytes. A witness generator
+// fixture declares no format and is recognized by its metadata.
 func (f *Fixture) IsStateless() bool {
-	return f.Info != nil && f.Info.FixtureFormat == SupportedStatelessFixtureFormat
+	if f.Info == nil {
+		return false
+	}
+
+	return f.Info.FixtureFormat == SupportedStatelessFixtureFormat ||
+		(f.Info.FixtureFormat == "" && f.Info.Metadata != nil && f.Info.Metadata.WitnessGenerator != nil)
+}
+
+// StatelessBlockHash returns the benchmark block's hash, from the header when
+// present and otherwise from the witness generator metadata.
+func (f *Fixture) StatelessBlockHash() string {
+	if len(f.Blocks) == 0 {
+		return ""
+	}
+
+	block := f.Blocks[len(f.Blocks)-1]
+	if block.BlockHeader != nil && block.BlockHeader.Hash != "" {
+		return block.BlockHeader.Hash
+	}
+
+	if f.Info != nil && f.Info.Metadata != nil && f.Info.Metadata.WitnessGenerator != nil {
+		return f.Info.Metadata.WitnessGenerator.BlockHash
+	}
+
+	return ""
 }
 
 // StatelessOpcodeCount returns the benchmark block's opcode counts from

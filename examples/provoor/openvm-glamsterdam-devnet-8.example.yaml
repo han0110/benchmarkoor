@@ -1,0 +1,101 @@
+# glamsterdam-devnet-8 suite
+global:
+  log_level: info
+
+runner:
+  client_logs_to_stdout: true
+  container_network: benchmarkoor
+  cleanup_on_start: false
+  # The forwarder listens only after worker readiness and a warmup proof.
+  ready_timeout: 15m
+
+  # Per-block metrics from the sidecars provoor runs on every node. The kind
+  # of each endpoint selects the series recorded from it, so no metric list
+  # belongs here. Counters are subtracted over each block and gauges are
+  # averaged.
+  remote_metrics:
+    enabled: true
+    interval: 100ms
+    endpoints:
+      - kind: dcgm-exporter
+        url: http://${NODE1_IP}:9401/metrics
+        labels: { node: node1 }
+        device_ids: [0, 1, 2, 3]
+      - kind: dcgm-exporter
+        url: http://${NODE2_IP}:9401/metrics
+        labels: { node: node2 }
+        device_ids: [0, 1, 2, 3]
+      - kind: dcgm-exporter
+        url: http://${NODE3_IP}:9401/metrics
+        labels: { node: node3 }
+        device_ids: [0, 1, 2, 3]
+      - kind: dcgm-exporter
+        url: http://${NODE4_IP}:9401/metrics
+        labels: { node: node4 }
+        device_ids: [0, 1, 2, 3]
+      - kind: node-exporter
+        url: http://${NODE1_IP}:9402/metrics
+        labels: { node: node1 }
+      - kind: node-exporter
+        url: http://${NODE2_IP}:9402/metrics
+        labels: { node: node2 }
+      - kind: node-exporter
+        url: http://${NODE3_IP}:9402/metrics
+        labels: { node: node3 }
+      - kind: node-exporter
+        url: http://${NODE4_IP}:9402/metrics
+        labels: { node: node4 }
+
+  benchmark:
+    results_dir: ./results
+    system_resource_collection_enabled: false
+    tests:
+      metadata:
+        labels:
+          name: "zkVM stateless validation, glamsterdam-devnet-8 blocks 100000-100999"
+      source:
+        eest_fixtures:
+          r2_bucket_url: https://pub-760ad8b3dd9547539f829c1ea30f18b5.r2.dev/devnets/glamsterdam-devnet-8
+          r2_bucket_starting_block: 100000
+          r2_bucket_blocks: 1000
+
+  instances:
+    - id: reth-openvm
+      client: provoor
+      image: ghcr.io/han0110/provoor/provoor:latest
+      metadata:
+        labels:
+          zkvm: openvm
+          stateless_validator: reth
+      extra_args:
+        - --zkvm=openvm
+        - --stateless-validator=reth
+        - --elf=https://github.com/paradigmxyz/stateless/releases/download/reth-guest-v0.1.0-rc.2/stateless-validator-reth-openvm-v2.1.0-preview.elf
+        - --vk=https://github.com/paradigmxyz/stateless/releases/download/reth-guest-v0.1.0-rc.2/stateless-validator-reth-openvm-v2.1.0-preview.vk
+        - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
+    - id: ethrex-openvm
+      client: provoor
+      image: ghcr.io/han0110/provoor/provoor:latest
+      metadata:
+        labels:
+          zkvm: openvm
+          stateless_validator: ethrex
+      extra_args:
+        - --zkvm=openvm
+        - --stateless-validator=ethrex
+        - --elf=https://github.com/lambdaclass/ethrex/releases/download/v26.0.0-rc.2/stateless-validator-ethrex-openvm-v2.1.0-preview.elf
+        - --vk=https://github.com/lambdaclass/ethrex/releases/download/v26.0.0-rc.2/stateless-validator-ethrex-openvm-v2.1.0-preview.vk
+        - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
+    # - id: zesu-openvm
+    #   client: provoor
+    #   image: ghcr.io/han0110/provoor/provoor:latest
+    #   metadata:
+    #     labels:
+    #       zkvm: openvm
+    #       stateless_validator: zesu
+    #   extra_args:
+    #     - --zkvm=openvm
+    #     - --stateless-validator=zesu
+    #     - --elf=https://github.com/han0110/zesu-zkvm/releases/download/glamsterdam-devnet-7/stateless-validator-zesu-openvm-v2.1.0-preview.elf
+    #     - --vk=https://github.com/han0110/zesu-zkvm/releases/download/glamsterdam-devnet-7/stateless-validator-zesu-openvm-v2.1.0-preview.vk
+    #     - --coordinator-endpoint=http://${COORDINATOR_IP}:3000

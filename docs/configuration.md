@@ -537,7 +537,7 @@ tests:
 | `genesis_artifact_run_id` | string | No | Latest | Specific workflow run ID for genesis artifact |
 | `fixtures_subdir` | string | No | `fixtures/blockchain_tests_engine_x` | Subdirectory within the fixtures to search |
 
-*Either `github_release`, `fixtures_artifact_name`, `local_fixtures_dir`/`local_genesis_dir`, or `local_fixtures_tarball`/`local_genesis_tarball` is required. Only one mode can be used at a time.
+*Either `github_release`, `fixtures_url`, `fixtures_artifact_name`, `local_fixtures_dir`/`local_genesis_dir`, `local_fixtures_tarball`/`local_genesis_tarball`, or `r2_bucket_url` is required. Only one mode can be used at a time.
 
 ###### From Local Directories
 
@@ -587,9 +587,32 @@ tests:
 
 `github_repo` is not required for local modes.
 
+###### From an R2 Bucket
+
+A stateless inputs catalog publishes live devnet blocks as EEST fixtures in an R2 bucket. The bucket serves `manifest.json`, which names the batch index, and each batch is a `tar.zst` archive of consecutive blocks. Only the batches that cover the configured block range are downloaded, and the run fails when a height in the range has no fixture. A reorged height carries more than one block, and only the block in the latest slot is benchmarked. Archives stay in the cache after extraction, keyed by the bucket URL, and the blocks inside the range are extracted next to them into a directory keyed by the range.
+
+```yaml
+tests:
+  source:
+    eest_fixtures:
+      r2_bucket_url: https://pub-760ad8b3dd9547539f829c1ea30f18b5.r2.dev/devnets/glamsterdam-devnet-8
+      r2_bucket_starting_block: 100000
+      r2_bucket_blocks: 1000
+```
+
+| Option | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `r2_bucket_url` | string | Yes | - | Bucket URL that serves `manifest.json` and the batch index it names |
+| `r2_bucket_starting_block` | integer | Yes | - | First block to benchmark, at least 1 |
+| `r2_bucket_blocks` | integer | Yes | - | Number of consecutive heights to benchmark, at least 1 |
+| `fixtures_subdir` | string | No | `blockchain_tests` | Subdirectory within a batch archive to search |
+
+Each block converts to one `engine_proveStatelessValidator` call. The catalog fixtures carry no opcode counts, so the suite reports none unless `tests.opcode_source` supplies them. `tests.filter` still applies to the fixture names, for example `filter: "block_100050_"`.
+
 **Key features:**
 - Automatically downloads and caches fixtures from GitHub releases or artifacts
 - Supports local directories and local `.tar.gz` tarballs for offline/development use
+- Downloads only the batches of an R2 bucket catalog that cover the configured block range
 - Converts EEST fixture format to `engine_newPayloadV{1-4}` + `engine_forkchoiceUpdatedV{1,3}` calls
 - Only includes fixtures with `fixture-format: blockchain_test_engine_x`
 - Auto-resolves genesis files per client type from the release/artifact/local source
