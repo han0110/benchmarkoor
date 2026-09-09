@@ -20,6 +20,7 @@ import { isPayloadSortCol, type PayloadSort } from '@/components/suite-detail/pa
 import { FacetPanel } from '@/components/shared/FacetPanel'
 import { FilterInput } from '@/components/shared/FilterInput'
 import { toggleSearchTerm, TEST_FILTER_HINT } from '@/utils/eestNameFilter'
+import { DEFAULT_THRESHOLD } from '@/utils/perfThreshold'
 import { OpcodeHeatmap } from '@/components/suite-detail/OpcodeHeatmap'
 import { PayloadSizesSection } from '@/components/suite-detail/PayloadSizesSection'
 import { TxCountsSection } from '@/components/suite-detail/TxCountsSection'
@@ -859,7 +860,7 @@ export function SuiteDetailPage() {
     navigate({
       to: '/suites/$suiteHash',
       params: { suiteHash },
-      search: { tab, client, image, status, sortBy, sortDir, chartMode, chartPassingOnly: chartPassingOnlyParam, heatmapColor, steps: serializeStepFilter(stepFilter), hq, hn, hr, hFs, hStat, hCs, hTh: th === 60 ? undefined : String(th), hRpc, hPs, groupBy },
+      search: { tab, client, image, status, sortBy, sortDir, chartMode, chartPassingOnly: chartPassingOnlyParam, heatmapColor, steps: serializeStepFilter(stepFilter), hq, hn, hr, hFs, hStat, hCs, hTh: th === DEFAULT_THRESHOLD ? undefined : String(th), hRpc, hPs, groupBy },
     })
   }
 

@@ -10,6 +10,7 @@ import { Spinner } from '@/components/shared/Spinner'
 import { TestName } from '@/components/shared/TestName'
 import { testNameMatches, toggleSearchTerm } from '@/utils/eestNameFilter'
 import { formatTimestamp } from '@/utils/date'
+import { DEFAULT_THRESHOLD } from '@/utils/perfThreshold'
 
 const DEFAULT_PAGE_SIZE = 20
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
@@ -22,7 +23,6 @@ const STAT_TO_CLIENT_FIELD: Record<(typeof STAT_COLUMNS)[number], keyof ClientSt
 const BIN_MULTIPLIERS = [0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]
 const MIN_THRESHOLD = 10
 const MAX_THRESHOLD = 1000
-const DEFAULT_THRESHOLD = 60
 
 // 5-level discrete color scale (green to red)
 const COLORS = [
@@ -556,6 +556,7 @@ export function TestHeatmap({ stats, testFiles, isDark, isLoading, suiteHash, su
               type="range"
               min={MIN_THRESHOLD}
               max={MAX_THRESHOLD}
+              step={0.1}
               value={threshold}
               onChange={(e) => handleThresholdChange(Number(e.target.value))}
               className="h-1.5 w-20 cursor-pointer appearance-none rounded-full bg-gray-200 accent-blue-500 sm:w-24 dark:bg-gray-700"
@@ -564,6 +565,7 @@ export function TestHeatmap({ stats, testFiles, isDark, isLoading, suiteHash, su
               type="number"
               min={MIN_THRESHOLD}
               max={MAX_THRESHOLD}
+              step={0.1}
               value={threshold}
               onChange={(e) => handleThresholdChange(Number(e.target.value))}
               className="w-14 rounded-sm border border-gray-300 bg-white px-1 py-0.5 text-center text-xs/5 focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500 sm:w-16 sm:px-1.5 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"

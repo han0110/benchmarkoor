@@ -4,7 +4,7 @@
 
 export const MIN_THRESHOLD = 1
 export const MAX_THRESHOLD = 1000
-export const DEFAULT_THRESHOLD = 60
+export const DEFAULT_THRESHOLD = 22.2
 
 export const THRESHOLD_COLORS = [
   '#22c55e', // very fast — green

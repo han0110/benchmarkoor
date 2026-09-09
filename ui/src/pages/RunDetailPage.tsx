@@ -376,7 +376,7 @@ export function RunDetailPage() {
   }
 
   const handleHeatmapThresholdChange = (threshold: number) => {
-    updateSearch({ heatmapThreshold: threshold !== 60 ? threshold : undefined })
+    updateSearch({ heatmapThreshold: threshold !== DEFAULT_THRESHOLD ? threshold : undefined })
   }
 
   const handleStepFilterChange = (steps: StepTypeOption[]) => {
@@ -774,6 +774,7 @@ export function RunDetailPage() {
                 type="range"
                 min={MIN_THRESHOLD}
                 max={MAX_THRESHOLD}
+                step={0.1}
                 value={heatmapThreshold ?? DEFAULT_THRESHOLD}
                 onChange={(e) => handleHeatmapThresholdChange(Number(e.target.value))}
                 className="h-1.5 w-24 cursor-pointer appearance-none rounded-full bg-gray-200 accent-blue-500 dark:bg-gray-700"
@@ -782,6 +783,7 @@ export function RunDetailPage() {
                 type="number"
                 min={MIN_THRESHOLD}
                 max={MAX_THRESHOLD}
+                step={0.1}
                 value={heatmapThreshold ?? DEFAULT_THRESHOLD}
                 onChange={(e) => handleHeatmapThresholdChange(Number(e.target.value))}
                 className="w-16 rounded-sm border border-gray-300 bg-white px-1.5 py-0.5 text-center text-xs/5 focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
