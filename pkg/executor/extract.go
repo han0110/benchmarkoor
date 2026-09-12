@@ -156,7 +156,9 @@ func extractTarZstFile(archivePath, targetDir string, keep func(name string) boo
 
 	defer func() { _ = f.Close() }()
 
-	zr, err := zstd.NewReader(f)
+	// Low memory mode moves the whole window down on every block once the
+	// output exceeds the window, which stalls on a 2 GiB window.
+	zr, err := zstd.NewReader(f, zstd.WithDecoderMaxWindow(1<<31), zstd.WithDecoderLowmem(false))
 	if err != nil {
 		return fmt.Errorf("creating zstd reader: %w", err)
 	}

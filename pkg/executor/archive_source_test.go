@@ -820,3 +820,24 @@ func createTestZipBytes(t *testing.T, files map[string]string) []byte {
 
 	return buf.Bytes()
 }
+
+// longWindowTarZst is a tar.zst archive of blockchain_tests/block.json holding
+// "{}", produced by `tar -cf - blockchain_tests/block.json | zstd --long=31`.
+// The frame declares a 2 GiB window, which exceeds the zstd decoder default.
+const longWindowTarZst = "28b52ffd00a8bd0200b2830d12903d0612d1e48741c5eee4503a5f77674901dffab8563bc6edc2377f801b3410191f2fe327a5715a6f0ce2e2ebb0a270bd265b9d2c0c2050299007fa851f2751180720fc40f2e004833d60d006581982496860"
+
+func TestExtractTarZstFile_LongWindow(t *testing.T) {
+	archive, err := hex.DecodeString(longWindowTarZst)
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "long.tar.zst")
+	require.NoError(t, os.WriteFile(archivePath, archive, 0o644))
+
+	targetDir := filepath.Join(dir, "out")
+	require.NoError(t, extractTarZstFile(archivePath, targetDir, func(string) bool { return true }))
+
+	content, err := os.ReadFile(filepath.Join(targetDir, "blockchain_tests", "block.json"))
+	require.NoError(t, err)
+	assert.Equal(t, "{}", string(content))
+}
