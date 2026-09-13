@@ -992,6 +992,13 @@ func (s *EESTSource) discoverTests() (*PreparedSource, error) {
 				}
 			}
 
+			// The line of a stateless step carries the whole witness, so the
+			// step converts its fixture again when read instead of holding
+			// the line of every test at once.
+			if fixture.IsStateless() {
+				test.Test.Provider = &statelessFixtureProvider{path: path, name: name}
+			}
+
 			result.Tests = append(result.Tests, test)
 			testsByFixtureKey[name] = test
 		}
@@ -1347,6 +1354,41 @@ func (p *linesProvider) Lines() []string {
 // Content returns the full content as bytes for hashing.
 func (p *linesProvider) Content() []byte {
 	return []byte(strings.Join(p.lines, "\n"))
+}
+
+// statelessFixtureProvider implements StepProvider for one stateless fixture
+// and converts it each time the step is read. The line it yields is identical
+// to the one discovery produced, so the suite hash is unchanged.
+type statelessFixtureProvider struct {
+	path string
+	name string
+}
+
+// Lines converts the fixture into its engine_proveStatelessValidator line.
+// Discovery converted the same fixture once already, so a failure means the
+// fixture file changed under the run.
+func (p *statelessFixtureProvider) Lines() []string {
+	data, err := os.ReadFile(p.path)
+	if err != nil {
+		panic(fmt.Sprintf("reading stateless fixture %s: %v", p.path, err))
+	}
+
+	fixtures, err := eest.ParseFixtureFile(data)
+	if err != nil {
+		panic(fmt.Sprintf("parsing stateless fixture %s: %v", p.path, err))
+	}
+
+	converted, err := eest.ConvertStatelessFixture(p.name, fixtures[p.name])
+	if err != nil {
+		panic(fmt.Sprintf("converting stateless fixture %s in %s: %v", p.name, p.path, err))
+	}
+
+	return converted.TestLines
+}
+
+// Content returns the full content as bytes for hashing.
+func (p *statelessFixtureProvider) Content() []byte {
+	return []byte(strings.Join(p.Lines(), "\n"))
 }
 
 // EESTSourceInfo contains EEST source information for the suite summary.

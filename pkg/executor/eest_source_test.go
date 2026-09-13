@@ -322,3 +322,26 @@ func TestSuiteSummaryStatelessOpcodeShape(t *testing.T) {
 	assert.NotContains(t, info, "opcode_count")
 	assert.NotContains(t, info["metadata"], "opcode_count_per_block")
 }
+
+// TestDiscoverStatelessLinesOnDemand pins that a stateless test step holds no
+// witness bytes after discovery. The step converts its fixture again when read,
+// and the bytes it yields match a direct conversion, so suite hashes are
+// unchanged.
+func TestDiscoverStatelessLinesOnDemand(t *testing.T) {
+	discovered := discoverStatelessFixture(t).Tests[0]
+
+	provider, ok := discovered.Test.Provider.(*statelessFixtureProvider)
+	require.True(t, ok, "stateless test step converts its fixture on demand")
+
+	data, err := os.ReadFile(provider.path)
+	require.NoError(t, err)
+
+	fixtures, err := eest.ParseFixtureFile(data)
+	require.NoError(t, err)
+
+	want, err := eest.ConvertStatelessFixture(provider.name, fixtures[provider.name])
+	require.NoError(t, err)
+
+	assert.Equal(t, want.TestLines, provider.Lines())
+	assert.Equal(t, []byte(want.TestLines[0]), provider.Content())
+}
