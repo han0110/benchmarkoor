@@ -402,6 +402,12 @@ func CreateSuiteOutput(
 func copyTestStepFile(testDir, stepType string, file *StepFile, owner *fsutil.OwnerConfig) (*SuiteFile, error) {
 	dstPath := filepath.Join(testDir, stepType+".request")
 
+	// A stateless request embeds the whole witness, which the fixtures cache
+	// already holds, so the suite describes the step without storing it.
+	if _, onDemand := file.Provider.(*statelessFixtureProvider); onDemand {
+		return &SuiteFile{OgPath: file.Name, Omitted: true}, nil
+	}
+
 	// Handle provider-based steps.
 	if file.Provider != nil {
 		if err := fsutil.WriteFile(dstPath, file.Provider.Content(), 0644, owner); err != nil {

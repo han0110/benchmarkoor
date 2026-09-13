@@ -345,3 +345,31 @@ func TestDiscoverStatelessLinesOnDemand(t *testing.T) {
 	assert.Equal(t, want.TestLines, provider.Lines())
 	assert.Equal(t, []byte(want.TestLines[0]), provider.Content())
 }
+
+// TestSuiteOutputOmitsStatelessRequest pins that a stateless suite describes
+// each test step without storing its request. The bytes stay in the fixtures
+// cache, and the suite hash still pins them.
+func TestSuiteOutputOmitsStatelessRequest(t *testing.T) {
+	prepared := discoverStatelessFixture(t)
+
+	resultsDir := t.TempDir()
+	log := logrus.New()
+	log.SetOutput(os.Stderr)
+	log.SetLevel(logrus.ErrorLevel)
+
+	require.NoError(t, CreateSuiteOutput(log, resultsDir, "statel3ss", &SuiteInfo{Hash: "statel3ss"}, prepared, nil, 0))
+
+	suiteDir := filepath.Join(resultsDir, "suites", "statel3ss")
+
+	data, err := os.ReadFile(filepath.Join(suiteDir, "summary.json"))
+	require.NoError(t, err)
+
+	var summary SuiteInfo
+	require.NoError(t, json.Unmarshal(data, &summary))
+	require.Len(t, summary.Tests, 1)
+	require.NotNil(t, summary.Tests[0].Test)
+	assert.True(t, summary.Tests[0].Test.Omitted)
+
+	_, err = os.Stat(filepath.Join(suiteDir, sanitizeResultPath(prepared.Tests[0].Name), "test.request"))
+	assert.True(t, os.IsNotExist(err), "no test.request is written for a stateless step")
+}
