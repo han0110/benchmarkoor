@@ -3,7 +3,7 @@ import type { DeviceMetrics, TestRemoteMetricsExporter } from '@/api/types'
 import { COLUMN } from './gpuMetrics'
 import { NODE_COLUMN } from './nodeMetrics'
 import { GAUGE_SCALE, mean } from './remoteMetrics'
-import { NODE_TRACE_COLUMN, TRACE_COLUMN, deviceColors, frameBufferTotals, reduceBlockMetrics, reduceGpuTraces, reduceNodeTraces, tracePeak } from './testMetrics'
+import { NODE_TRACE_COLUMN, TRACE_COLUMN, deviceColors, frameBufferTotals, reduceBlockMetrics, reduceGpuTraces, reduceNodeTraces, traceMin, tracePeak } from './testMetrics'
 
 const GIB = 1024 ** 3
 
@@ -232,6 +232,13 @@ describe('tracePeak', () => {
   })
 })
 
+describe('traceMin', () => {
+  it('reads the lowest reading of any device of a trace', () => {
+    expect(traceMin(reduceGpuTraces(gpuExporter).tempMargin)).toBe(10)
+    expect(traceMin(undefined)).toBeNull()
+  })
+})
+
 describe('reduceBlockMetrics', () => {
   const deviceColumns = [
     'device',
@@ -377,10 +384,9 @@ describe('reduceBlockMetrics', () => {
     expect(block.hasPower).toBe(false)
   })
 
-  it('reads the frame buffer total of every GPU of the block by its trace label', () => {
-    expect(frameBufferTotals(deviceMetrics, 'b.json')).toEqual({ 'node1 gpu0': 32, 'node1 gpu1': 32 })
-    expect(frameBufferTotals(deviceMetrics, 'a.json')).toEqual({ 'node1 gpu0': 32 })
-    expect(frameBufferTotals(deviceMetrics, 'c.json')).toEqual({})
+  it('reads the frame buffer total of every GPU of the run by its trace label', () => {
+    // Only b.json holds a row of the idle GPU, and its total reads all the same.
+    expect(frameBufferTotals(deviceMetrics)).toEqual({ 'node1 gpu0': 32, 'node1 gpu1': 32 })
   })
 })
 

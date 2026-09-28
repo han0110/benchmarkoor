@@ -3,8 +3,8 @@ import { useDeviceMetrics, useNodeMetrics } from '@/api/hooks/useRemoteMetrics'
 import { useTestRemoteMetrics } from '@/api/hooks/useTestRemoteMetrics'
 import { clockEventNames } from '@/utils/gpuMetrics'
 import { cpuCoreCounts, cpuUsageFigure } from '@/utils/nodeMetrics'
-import { higher, max } from '@/utils/remoteMetrics'
-import { frameBufferTotals, reduceBlockMetrics, reduceGpuTraces, reduceNodeTraces, tracePeak, type TraceSeries } from '@/utils/testMetrics'
+import { agreed, higher, max } from '@/utils/remoteMetrics'
+import { frameBufferTotals, reduceBlockMetrics, reduceGpuTraces, reduceNodeTraces, traceMin, tracePeak, type TraceSeries } from '@/utils/testMetrics'
 import { ChartSection, RemoteMetricsPanel, StatCard } from './RemoteMetricsPanel'
 import { PERCENT_FLOOR, figure, useDarkMode, useTraceOptionBuilder, type Reference } from './remoteMetricsChart'
 
@@ -59,9 +59,10 @@ export function TestRemoteMetrics({ runId, testName }: TestRemoteMetricsProps) {
   // reads as the block's slice of its run card.
   const block = useMemo(() => reduceBlockMetrics(deviceMetrics, nodeMetrics, testName), [deviceMetrics, nodeMetrics, testName])
   // The trace holds no frame buffer total, so the limit of the used chart and
-  // the headroom of each device come from the run artifact.
-  const fbTotal = block.gpu?.fbTotal ?? null
-  const fbTotals = useMemo(() => (deviceMetrics ? frameBufferTotals(deviceMetrics, testName) : {}), [deviceMetrics, testName])
+  // the headroom of each device come from the run artifact. A failed test has
+  // no block there and reads the total every GPU of the run shares.
+  const fbTotals = useMemo(() => (deviceMetrics ? frameBufferTotals(deviceMetrics) : {}), [deviceMetrics])
+  const fbTotal = block.gpu ? block.gpu.fbTotal : agreed(Object.values(fbTotals))
 
   const gpu = useMemo(() => {
     const exporter = data?.exporters['dcgm-exporter']
@@ -128,6 +129,11 @@ export function TestRemoteMetrics({ runId, testName }: TestRemoteMetricsProps) {
   // the busiest interval of the trace instead.
   const peakSmActive = tracePeak(gpu?.smActive)
   const peakCpuBusy = tracePeak(node?.cpuBusy)
+  const peakSmActiveFigure = `${figure(peakSmActive?.value ?? null, 1)}%`
+  const peakCpuUsageFigure = cpuUsageFigure(peakCpuBusy?.value ?? null, peakCpuBusy ? cpuCores[peakCpuBusy.name] : null)
+  // A failed test has no block in the run artifacts, so its cards read the
+  // trace alone and leave out every figure that needs the counters.
+  const peakFbUsed = tracePeak(gpu?.fbUsedGiB)
 
   return (
     <RemoteMetricsPanel
@@ -138,14 +144,20 @@ export function TestRemoteMetrics({ runId, testName }: TestRemoteMetricsProps) {
           {block.node && (
             <>
               <StatCard label="Mean CPU Usage" value={cpuUsageFigure(block.node.meanCpuBusy, block.node.cpuCores)} />
-              <StatCard label="Peak CPU Usage" value={cpuUsageFigure(peakCpuBusy?.value ?? null, peakCpuBusy ? cpuCores[peakCpuBusy.name] : null)} />
+              <StatCard label="Peak CPU Usage" value={peakCpuUsageFigure} />
               {block.node.ramTotal !== null && <StatCard label="Peak RAM Used" value={`${figure(block.node.peakRamUsed, 1)} / ${block.node.ramTotal} GiB`} />}
+            </>
+          )}
+          {!block.node && node && (
+            <>
+              <StatCard label="Peak CPU Usage" value={peakCpuUsageFigure} />
+              <StatCard label="Peak RAM Used" value={`${figure(tracePeak(node.ramUsedGiB)?.value ?? null, 1)} GiB`} />
             </>
           )}
           {block.gpu && (
             <>
               <StatCard label="Mean SM Active" value={`${figure(block.gpu.meanSmActive, 1)}%`} />
-              <StatCard label="Peak SM Active" value={`${figure(peakSmActive?.value ?? null, 1)}%`} />
+              <StatCard label="Peak SM Active" value={peakSmActiveFigure} />
               {block.hasPower && <StatCard label="Mean GPU Power" value={`${figure(block.gpu.meanWatts, 0)} W`} />}
               {block.gpu.powerLimit !== null && <StatCard label="Peak GPU Power" value={`${figure(block.gpu.peakWatts, 0)} / ${figure(block.gpu.powerLimit, 0)} W`} />}
               {block.gpu.fbTotal !== null && <StatCard label="Peak Frame Buffer" value={`${figure(block.gpu.peakFbUsed, 1)} / ${figure(block.gpu.fbTotal, 1)} GiB`} />}
@@ -156,6 +168,16 @@ export function TestRemoteMetrics({ runId, testName }: TestRemoteMetricsProps) {
               {block.hasSmClock && <StatCard label="Mean SM Clock" value={`${figure(block.gpu.meanSmClock, 0)} MHz`} />}
               {block.hasSmClock && <StatCard label="Min SM Clock" value={`${figure(block.gpu.minSmClock, 0)} MHz`} />}
               {block.hasSmClock && <StatCard label="Clock Events" value={block.gpu.clockEvents === null ? 'n/a' : clockEventNames(block.gpu.clockEvents).join(', ') || 'none'} />}
+            </>
+          )}
+          {!block.gpu && gpu && (
+            <>
+              <StatCard label="Peak SM Active" value={peakSmActiveFigure} />
+              <StatCard label="Peak GPU Power" value={`${figure(tracePeak(gpu.power)?.value ?? null, 0)} W`} />
+              {peakFbUsed && fbTotals[peakFbUsed.name] !== undefined && (
+                <StatCard label="Peak Frame Buffer" value={`${figure(peakFbUsed.value, 1)} / ${figure(fbTotals[peakFbUsed.name], 1)} GiB`} />
+              )}
+              <StatCard label="Min Temp Margin" value={`${figure(traceMin(gpu.tempMargin), 0)} °C`} />
             </>
           )}
         </>

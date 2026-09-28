@@ -1,7 +1,7 @@
 import type { DeviceMetricDevice, DeviceMetrics, TestRemoteMetricsExporter } from '@/api/types'
 import { COLUMN, clockEventNames, reduceGpuMetrics, type GpuSummary } from './gpuMetrics'
 import { reduceNodeMetrics, type NodeSummary } from './nodeMetrics'
-import { GAUGE_SCALE, LEADING, NO_METRICS, columnReader, host, max, mean } from './remoteMetrics'
+import { GAUGE_SCALE, LEADING, NO_METRICS, columnReader, host, max, mean, min } from './remoteMetrics'
 
 /** The instant column that leads every row, in milliseconds after the proving window started. */
 const AT_MS = 'at_ms'
@@ -244,6 +244,11 @@ export function tracePeak(series: TraceSeries[] | undefined) {
   return points.reduce<(typeof points)[number] | null>((top, point) => (top === null || point.value > top.value ? point : top), null)
 }
 
+/** traceMin reads the lowest reading any device of a trace reached. */
+export function traceMin(series: TraceSeries[] | undefined) {
+  return min((series ?? []).flatMap(({ data }) => data.flatMap(([, value]) => (value === null ? [] : [value]))))
+}
+
 /**
  * BlockMetrics holds one test of the run artifacts, the figures the cards of
  * the test modal read beside the peaks of its traces. Counters reduced over
@@ -280,23 +285,26 @@ export function reduceBlockMetrics(
 }
 
 /**
- * frameBufferTotals reads the frame buffer total of each GPU of one block, in
- * GiB, keyed by the label the per test traces name their series after. A
- * device is absent when the artifact does not carry the block, or when its
- * row lacks the total.
+ * frameBufferTotals reads the frame buffer total of each GPU of the run, in
+ * GiB, keyed by the label the per test traces name their series after. The
+ * total is a property of the card, so every test reads it from any row, a
+ * failed test too, which the artifact does not carry. A device is absent when
+ * none of its rows carries the total.
  */
-export function frameBufferTotals(metrics: DeviceMetrics, testName: string): Record<string, number> {
+export function frameBufferTotals(metrics: DeviceMetrics): Record<string, number> {
   const { cell } = columnReader(metrics)
   const totals: Record<string, number> = {}
 
-  for (const rows of Object.values(metrics.tests[testName] ?? {})) {
-    for (const row of rows) {
-      const device = cell(row, LEADING.device)
-      const total = cell(row, COLUMN.fbTotal)
-      if (device === null || total === null) continue
+  for (const blocks of Object.values(metrics.tests)) {
+    for (const rows of Object.values(blocks)) {
+      for (const row of rows) {
+        const device = cell(row, LEADING.device)
+        const total = cell(row, COLUMN.fbTotal)
+        if (device === null || total === null) continue
 
-      // The frame buffer is reported in mebibytes.
-      totals[gpuLabel(metrics.devices[device])] = total / (GAUGE_SCALE * 1024)
+        // The frame buffer is reported in mebibytes.
+        totals[gpuLabel(metrics.devices[device])] = total / (GAUGE_SCALE * 1024)
+      }
     }
   }
 
