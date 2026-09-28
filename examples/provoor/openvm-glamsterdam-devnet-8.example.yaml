@@ -66,6 +66,7 @@ runner:
       metadata:
         labels:
           zkvm: openvm
+          zkvm_version: v2.1.0-preview
           stateless_validator: reth
       extra_args:
         - --zkvm=openvm
@@ -79,6 +80,7 @@ runner:
       metadata:
         labels:
           zkvm: openvm
+          zkvm_version: v2.1.0-preview
           stateless_validator: ethrex
       extra_args:
         - --zkvm=openvm

@@ -68,6 +68,7 @@ runner:
       metadata:
         labels:
           zkvm: zisk
+          zkvm_version: v1.3.0-alpha
           stateless_validator: reth
       extra_args:
         - --zkvm=zisk
@@ -81,6 +82,7 @@ runner:
       metadata:
         labels:
           zkvm: zisk
+          zkvm_version: v1.3.0-alpha
           stateless_validator: ethrex
       extra_args:
         - --zkvm=zisk
@@ -94,6 +96,7 @@ runner:
       metadata:
         labels:
           zkvm: zisk
+          zkvm_version: v1.3.0-alpha
           stateless_validator: zesu
       extra_args:
         - --zkvm=zisk
