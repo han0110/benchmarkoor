@@ -17,6 +17,8 @@ interface FilesPanelProps {
   runId: string
   tests: Record<string, TestEntry>
   postTestRPCCalls?: PostTestRPCCallConfig[]
+  pipelineTests: Set<string>
+  hasRemoteMetrics: boolean
   showDownloadList: boolean
   downloadFormat: DownloadListFormat
   onShowDownloadListChange: (open: boolean) => void
@@ -119,13 +121,19 @@ function buildTestResponsesEntries(runId: string, tests: Record<string, TestEntr
 }
 
 // The remote metric traces and the proving pipeline of a test, written
-// compressed beside the step results.
-const TEST_ARTIFACT_FILES = ['test.remote-metrics.json.gz', 'test.pipeline.json.gz'] as const
+// compressed beside the step results. The traces exist when the run collected
+// remote metrics, and the pipeline when the test has a block log of a proving run.
+function getTestArtifactFiles(testName: string, pipelineTests: Set<string>, hasRemoteMetrics: boolean): string[] {
+  return [
+    ...(hasRemoteMetrics ? ['test.remote-metrics.json.gz'] : []),
+    ...(pipelineTests.has(testName) ? ['test.pipeline.json.gz'] : []),
+  ]
+}
 
-function buildTestArtifactEntries(runId: string, testNames: string[]): FileEntry[] {
+function buildTestArtifactEntries(runId: string, testNames: string[], pipelineTests: Set<string>, hasRemoteMetrics: boolean): FileEntry[] {
   const entries: FileEntry[] = []
   for (const testName of testNames) {
-    for (const filename of TEST_ARTIFACT_FILES) {
+    for (const filename of getTestArtifactFiles(testName, pipelineTests, hasRemoteMetrics)) {
       entries.push({
         testName,
         filename,
@@ -169,6 +177,8 @@ function buildFileTree(
   tests: Record<string, TestEntry>,
   runId: string,
   postTestRPCCalls: PostTestRPCCallConfig[],
+  pipelineTests: Set<string>,
+  hasRemoteMetrics: boolean,
 ): TreeNode[] {
   const nodes: TreeNode[] = []
 
@@ -212,7 +222,7 @@ function buildFileTree(
     }
 
     // Remote metrics and pipeline artifacts of the test
-    for (const filename of TEST_ARTIFACT_FILES) {
+    for (const filename of getTestArtifactFiles(testName, pipelineTests, hasRemoteMetrics)) {
       const path = `runs/${runId}/${testName}/${filename}`
       children.push({
         id: path,
@@ -521,7 +531,7 @@ interface CategoryInfo {
 
 // --- FilesPanel ---
 
-export function FilesPanel({ runId, tests, postTestRPCCalls, showDownloadList, downloadFormat, onShowDownloadListChange, onDownloadFormatChange }: FilesPanelProps) {
+export function FilesPanel({ runId, tests, postTestRPCCalls, pipelineTests, hasRemoteMetrics, showDownloadList, downloadFormat, onShowDownloadListChange, onDownloadFormatChange }: FilesPanelProps) {
   const [expanded, setExpanded] = useState(showDownloadList)
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set())
   const [fileFilter, setFileFilter] = useState<'all' | 'dumps'>('all')
@@ -532,7 +542,10 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, showDownloadList, d
   const generalEntries = useMemo(() => buildGeneralEntries(runId), [runId])
   const testStatsEntries = useMemo(() => buildTestStatsEntries(runId, tests), [runId, tests])
   const testResponsesEntries = useMemo(() => buildTestResponsesEntries(runId, tests), [runId, tests])
-  const testArtifactEntries = useMemo(() => buildTestArtifactEntries(runId, testNames), [runId, testNames])
+  const testArtifactEntries = useMemo(
+    () => buildTestArtifactEntries(runId, testNames, pipelineTests, hasRemoteMetrics),
+    [runId, testNames, pipelineTests, hasRemoteMetrics],
+  )
   const postTestDumpEntries = useMemo(
     () => buildPostTestDumpEntries(runId, testNames, postTestRPCCalls ?? []),
     [runId, testNames, postTestRPCCalls],
@@ -542,8 +555,8 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, showDownloadList, d
 
   // Build file trees
   const allTree = useMemo(
-    () => buildFileTree(generalEntries, tests, runId, postTestRPCCalls ?? []),
-    [generalEntries, tests, runId, postTestRPCCalls],
+    () => buildFileTree(generalEntries, tests, runId, postTestRPCCalls ?? [], pipelineTests, hasRemoteMetrics),
+    [generalEntries, tests, runId, postTestRPCCalls, pipelineTests, hasRemoteMetrics],
   )
   const dumpsTree = useMemo(
     () => buildDumpsOnlyTree(tests, runId, postTestRPCCalls ?? []),
@@ -596,10 +609,21 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, showDownloadList, d
     })
   }, [])
 
+  // The general files differ between runs, so the download list and the file
+  // count leave out those a HEAD request finds missing.
+  const existingGeneralEntries = useQueries({
+    queries: generalEntries.map((entry) => ({
+      queryKey: ['file-panel', entry.path],
+      queryFn: () => fetchHead(entry.path),
+      staleTime: Infinity,
+    })),
+    combine: (results) => generalEntries.filter((_, i) => results[i].data?.exists !== false),
+  })
+
   // Categories for download modal
   const categories: CategoryInfo[] = useMemo(() => {
     const result: CategoryInfo[] = [
-      { key: 'general', label: 'General', entries: generalEntries },
+      { key: 'general', label: 'General', entries: existingGeneralEntries },
       { key: 'test-stats', label: 'Stats', entries: testStatsEntries },
       { key: 'test-responses', label: 'Responses', entries: testResponsesEntries },
       { key: 'test-artifacts', label: 'Remote Metrics & Pipeline', entries: testArtifactEntries },
@@ -608,7 +632,7 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, showDownloadList, d
       result.push({ key: 'post-test-rpc-dumps', label: 'Post-Test RPC Dumps', entries: postTestDumpEntries })
     }
     return result
-  }, [generalEntries, testStatsEntries, testResponsesEntries, testArtifactEntries, postTestDumpEntries, hasPostTestDumps])
+  }, [existingGeneralEntries, testStatsEntries, testResponsesEntries, testArtifactEntries, postTestDumpEntries, hasPostTestDumps])
 
   const toggleCategory = useCallback((key: string) => {
     setExcludedCategories((prev) => {
@@ -721,7 +745,7 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, showDownloadList, d
     URL.revokeObjectURL(url)
   }, [downloadListText, downloadFormat, runId])
 
-  const totalEntries = generalEntries.length + testStatsEntries.length + testResponsesEntries.length + testArtifactEntries.length + postTestDumpEntries.length
+  const totalEntries = existingGeneralEntries.length + testStatsEntries.length + testResponsesEntries.length + testArtifactEntries.length + postTestDumpEntries.length
   const summary = `${totalEntries} file${totalEntries !== 1 ? 's' : ''}`
 
   return (

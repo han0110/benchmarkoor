@@ -245,6 +245,12 @@ export function RunDetailPage() {
     return sorted.slice(0, MAX_COMPARE_RUNS)
   }, [clientRuns])
 
+  // A proving run writes the pipeline of every test it holds a block log for.
+  const pipelineTests = useMemo(
+    () => new Set(isProvingRun(config) && blockLogs ? Object.keys(blockLogs) : []),
+    [config, blockLogs],
+  )
+
   // Merge per-run opcode counts (test-opcodes.json) into the suite's
   // SuiteTest list so OpcodeHeatmap renders run-extracted data when
   // available. Per-test, sum counts across the array of newPayloads
@@ -752,6 +758,8 @@ export function RunDetailPage() {
         runId={runId}
         tests={result?.tests ?? {}}
         postTestRPCCalls={config.instance.post_test_rpc_calls}
+        pipelineTests={pipelineTests}
+        hasRemoteMetrics={deviceMetrics != null || nodeMetrics != null}
         showDownloadList={dlModal}
         downloadFormat={(dlFmt as 'urls' | 'curl') ?? 'curl'}
         onShowDownloadListChange={handleDownloadListModalChange}
