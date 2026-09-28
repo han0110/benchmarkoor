@@ -677,7 +677,7 @@ export function RunDetailPage() {
                         .sort(([, a], [, b]) => b - a)
                         .map(([method, count]) => (
                           <div key={method} className="flex justify-between gap-2">
-                            <span>{method}</span>
+                            <span className="min-w-0 truncate" title={method}>{method}</span>
                             <span>{formatNumber(count)}</span>
                           </div>
                         ))}
