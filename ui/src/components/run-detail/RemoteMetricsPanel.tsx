@@ -18,7 +18,8 @@ export function StatCard({ label, value }: StatCardProps) {
 }
 
 interface ChartSectionProps {
-  title: string
+  /** Heading of the plot, left out where the card around it already names it. */
+  title?: string
   option: object
   onZoom: (start: number, end: number) => void
   onPointClick?: (testName: string) => void
@@ -29,6 +30,8 @@ interface ChartSectionProps {
 
 export function ChartSection({ title, option, onZoom, onPointClick, highlightedTestRef, height = '200px' }: ChartSectionProps) {
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null)
+  const chartRef = useRef<ReactECharts | null>(null)
+  const legendToggled = useRef(false)
 
   const onEvents = useMemo(
     () => ({
@@ -38,6 +41,9 @@ export function ChartSection({ title, option, onZoom, onPointClick, highlightedT
         } else if (params.start !== undefined && params.end !== undefined) {
           onZoom(params.start, params.end)
         }
+      },
+      legendselectchanged: () => {
+        legendToggled.current = true
       },
     }),
     [onZoom],
@@ -49,12 +55,23 @@ export function ChartSection({ title, option, onZoom, onPointClick, highlightedT
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
+      // A legend click opens no test, also where a long legend wraps into the plot grid.
+      if (legendToggled.current) {
+        legendToggled.current = false
+        return
+      }
       if (mouseDownPos.current) {
         const dx = Math.abs(e.clientX - mouseDownPos.current.x)
         const dy = Math.abs(e.clientY - mouseDownPos.current.y)
         if (dx > 5 || dy > 5) {
           return
         }
+      }
+      // A click outside the plot grid, such as on the legend, opens no test.
+      const chart = chartRef.current?.getEchartsInstance()
+      const bounds = e.currentTarget.getBoundingClientRect()
+      if (!chart?.containPixel('grid', [e.clientX - bounds.left, e.clientY - bounds.top])) {
+        return
       }
       if (onPointClick && highlightedTestRef?.current) {
         onPointClick(highlightedTestRef.current)
@@ -65,13 +82,14 @@ export function ChartSection({ title, option, onZoom, onPointClick, highlightedT
 
   return (
     <div className="rounded-xs bg-gray-50 p-3 dark:bg-gray-700/50">
-      <h4 className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-300">{title}</h4>
+      {title && <h4 className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-300">{title}</h4>}
       <div
         onMouseDown={handleMouseDown}
         onClick={handleClick}
         style={{ cursor: onPointClick ? 'pointer' : 'default' }}
       >
         <ReactECharts
+          ref={chartRef}
           option={option}
           style={{ height, width: '100%' }}
           opts={{ renderer: 'svg' }}

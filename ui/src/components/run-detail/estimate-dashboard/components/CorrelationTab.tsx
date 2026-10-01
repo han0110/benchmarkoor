@@ -33,7 +33,7 @@ interface CorrelationChartProps {
   onTestClick?: (testName: string) => void
 }
 
-/** One point per test against the fitted line, the value axis holding a duration and the cost axis a price. */
+/** One point per test against the fitted line, the value axis holding a duration and the cost axis an estimated cost. */
 function CorrelationChart({ title, points, fit, isDark, nameMode, zoomRange, onZoom, onTestClick }: CorrelationChartProps) {
   const highlightedTestRef = useRef<string | null>(null)
 

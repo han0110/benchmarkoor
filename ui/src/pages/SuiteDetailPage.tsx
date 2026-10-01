@@ -25,6 +25,7 @@ import { OpcodeHeatmap } from '@/components/suite-detail/OpcodeHeatmap'
 import { PayloadSizesSection } from '@/components/suite-detail/PayloadSizesSection'
 import { TxCountsSection } from '@/components/suite-detail/TxCountsSection'
 import { RunsTable } from '@/components/runs/RunsTable'
+import { SuiteEstimateCount, SuiteEstimates } from '@/components/estimates/EstimatesList'
 import { sortIndexEntries, type SortColumn, type SortDirection } from '@/components/runs/sortEntries'
 import { RunFilters, type TestStatusFilter } from '@/components/runs/RunFilters'
 import { parseLabelFilters, serializeLabelFilters, type LabelFilters } from '@/components/runs/labelFilterUtils'
@@ -663,12 +664,13 @@ export function SuiteDetailPage() {
   // EEST build metadata renders as a section inside the Source tab when present.
   const hasEestMeta = !!suite.eest_metadata
 
-  // Tab order: runs(0), tests(1), pre_run_steps(2, conditional), source(last)
-  const sourceTabIndex = hasPreRunSteps ? 3 : 2
+  // Tab order: runs(0), estimates(1), tests(2), pre_run_steps(3, conditional), source(last)
+  const sourceTabIndex = hasPreRunSteps ? 4 : 3
 
   const getTabIndex = () => {
-    if (tab === 'tests') return 1
-    if (tab === 'pre_run_steps' && hasPreRunSteps) return 2
+    if (tab === 'estimates') return 1
+    if (tab === 'tests') return 2
+    if (tab === 'pre_run_steps' && hasPreRunSteps) return 3
     if (tab === 'source') return sourceTabIndex
     return 0 // runs is default
   }
@@ -678,6 +680,8 @@ export function SuiteDetailPage() {
     if (index === 0) {
       newTab = 'runs'
     } else if (index === 1) {
+      newTab = 'estimates'
+    } else if (index === 2) {
       newTab = 'tests'
     } else if (index === sourceTabIndex) {
       newTab = 'source'
@@ -972,6 +976,19 @@ export function SuiteDetailPage() {
           >
             Runs
             <Badge variant="info">{suiteRunsAll.length}</Badge>
+          </Tab>
+          <Tab
+            className={({ selected }) =>
+              clsx(
+                'flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-xs px-2.5 py-1.5 text-xs/5 font-medium transition-colors focus:outline-hidden sm:gap-2 sm:px-4 sm:py-2 sm:text-sm/6',
+                selected
+                  ? 'bg-white text-gray-900 shadow-xs dark:bg-gray-700 dark:text-gray-100'
+                  : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100',
+              )
+            }
+          >
+            Estimates
+            <Badge variant="info"><SuiteEstimateCount suiteHash={suiteHash} /></Badge>
           </Tab>
           <Tab
             className={({ selected }) =>
@@ -1477,6 +1494,9 @@ export function SuiteDetailPage() {
                 )}
               </div>
             )}
+          </TabPanel>
+          <TabPanel>
+            <SuiteEstimates suiteHash={suiteHash} />
           </TabPanel>
           <TabPanel className="flex flex-col gap-4">
             {/* Global search for the Tests tab. Sticky to the viewport on

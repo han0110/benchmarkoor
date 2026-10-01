@@ -8,9 +8,12 @@ import { type StepTypeOption, ALL_STEP_TYPES, getAggregatedStats } from '@/pages
 import { percentile } from './block-logs-dashboard/utils/statistics'
 import { DEFAULT_THRESHOLD, getColorByThreshold } from '@/utils/perfThreshold'
 
+/** The value of each test in place of MGas/s. `format` prints a value, and `label` names it in the hover text. */
+type DimensionMetric = { samples: { name: string; value: number }[]; format: (value: number) => string; label: string }
+
 interface DimensionInsightsProps {
-  tests: Record<string, TestEntry>
-  stepFilter: StepTypeOption[]
+  tests?: Record<string, TestEntry>
+  stepFilter?: StepTypeOption[]
   searchQuery?: string
   statusFilter?: 'all' | 'passed' | 'failed'
   /** Toggle a `key=value` term in the page-level search. */
@@ -25,6 +28,7 @@ interface DimensionInsightsProps {
    * modal opens for that test instead of adding a redundant filter.
    */
   onTestClick?: (testName: string) => void
+  metric?: DimensionMetric
 }
 
 type DimensionDef = { key: string; label: string; emitKey: string }
@@ -87,9 +91,10 @@ export function DimensionInsights({
   query,
   threshold = DEFAULT_THRESHOLD,
   onTestClick,
+  metric,
 }: DimensionInsightsProps) {
   const [view, setView] = useState<'bars' | 'table'>('bars')
-  const [barsDir, setBarsDir] = useState<'desc' | 'asc'>('asc')
+  const [barsDir, setBarsDir] = useState<'desc' | 'asc'>(metric ? 'desc' : 'asc')
   const [showAllBars, setShowAllBars] = useState(false)
   const [groupByKey, setGroupByKey] = useState<string | null>(null)
   const [tableSort, setTableSort] = useState<{ col: SortColumn; dir: 'asc' | 'desc' }>({ col: 'mean', dir: 'desc' })
@@ -98,7 +103,7 @@ export function DimensionInsights({
     // 1. Compute mgas per test, applying the same filter as the heatmap.
     const matchesQuery = searchQuery ? compileQuery(searchQuery) : null
     const samples: { name: string; mgas: number }[] = []
-    for (const [name, entry] of Object.entries(tests)) {
+    for (const [name, entry] of metric ? [] : Object.entries(tests ?? {})) {
       if (matchesQuery && !matchesQuery(name)) continue
       const stats = getAggregatedStats(entry, stepFilter)
       if (!stats) continue
@@ -112,6 +117,7 @@ export function DimensionInsights({
       if (mgas === undefined) continue
       samples.push({ name, mgas })
     }
+    for (const { name, value } of metric?.samples ?? []) samples.push({ name, mgas: value })
 
     // 2. Bucket samples by (dimension, value), keeping both the mgas array
     //    and the source test names so a 1-test bucket can deep-link to the
@@ -182,7 +188,7 @@ export function DimensionInsights({
     }
 
     return result
-  }, [tests, stepFilter, searchQuery, statusFilter])
+  }, [tests, stepFilter, searchQuery, statusFilter, metric])
 
   // Pick a default dimension for the table view once we have data.
   const groupByDim = groupByKey ?? dimensions[0]?.def.key ?? null
@@ -208,6 +214,8 @@ export function DimensionInsights({
   // The page filter terms feeding this breakdown. Free-text terms (no `:`
   // or `=`) are kept too — they also affect what's counted.
   const activeTerms = splitQuery(query)
+  const { format, label } = metric ?? { format: (value: number) => value.toFixed(1), label: 'MGas/s' }
+  const [descendingLabel, ascendingLabel] = metric ? ['Highest first', 'Lowest first'] : ['Fastest first', 'Slowest first']
 
   return (
     <div className="overflow-hidden rounded-sm border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
@@ -265,12 +273,12 @@ export function DimensionInsights({
                 <button
                   type="button"
                   onClick={() => setBarsDir(barsDir === 'desc' ? 'asc' : 'desc')}
-                  title={barsDir === 'desc' ? 'Click to sort slowest first' : 'Click to sort fastest first'}
+                  title={`Click to sort ${(barsDir === 'desc' ? ascendingLabel : descendingLabel).toLowerCase()}`}
                   className="flex cursor-pointer items-center gap-1 rounded-xs border border-gray-300 bg-white px-2 py-1 text-xs/5 font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 dark:hover:text-gray-100"
                 >
                   {barsDir === 'desc'
-                    ? <><ChevronDown className="size-3.5" /> Fastest first</>
-                    : <><ChevronUp className="size-3.5" /> Slowest first</>}
+                    ? <><ChevronDown className="size-3.5" /> {descendingLabel}</>
+                    : <><ChevronUp className="size-3.5" /> {ascendingLabel}</>}
                 </button>
               )}
             </div>
@@ -348,9 +356,9 @@ export function DimensionInsights({
                             }
                           }}
                           title={
-                            !active && v.singleTestName
-                              ? `${def.label}: ${v.value} — open the only matching test (${v.mean.toFixed(1)} MGas/s)`
-                              : `${def.label}: ${v.value} — mean ${v.mean.toFixed(1)} MGas/s, ${v.count} test${v.count === 1 ? '' : 's'}`
+                            !active && v.singleTestName && onTestClick
+                              ? `${def.label}: ${v.value} — open the only matching test (${format(v.mean)} ${label})`
+                              : `${def.label}: ${v.value} — mean ${format(v.mean)} ${label}, ${v.count} test${v.count === 1 ? '' : 's'}`
                           }
                           className={clsx(
                             'group grid cursor-pointer grid-cols-[minmax(7rem,12rem)_1fr_auto] items-center gap-2 rounded-xs px-1 py-0.5 text-left text-xs/5 transition-colors',
@@ -365,14 +373,14 @@ export function DimensionInsights({
                               className="absolute inset-y-0 left-0 rounded-xs"
                               style={{
                                 width: `${widthPct}%`,
-                                backgroundColor: getColorByThreshold(v.mean, threshold),
+                                backgroundColor: metric ? '#9ca3af' : getColorByThreshold(v.mean, threshold),
                                 outline: active ? '1.5px solid #3b82f6' : 'none',
                                 outlineOffset: '0px',
                               }}
                             />
                           </span>
                           <span className="flex shrink-0 items-baseline gap-1.5 font-mono tabular-nums text-gray-600 dark:text-gray-300">
-                            <span>{v.mean.toFixed(1)}</span>
+                            <span>{format(v.mean)}</span>
                             <span className="text-[10px]/4 text-gray-400 dark:text-gray-500">×{v.count}</span>
                           </span>
                         </button>
@@ -433,17 +441,17 @@ export function DimensionInsights({
                           active ? 'bg-blue-50 dark:bg-blue-950/40' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50',
                         )}
                         title={
-                          !active && v.singleTestName
+                          !active && v.singleTestName && onTestClick
                             ? `Open the only matching test`
                             : active ? `Click to remove ${term}` : `Click to filter by ${term}`
                         }
                       >
                         <td className="px-2 py-1 font-mono text-gray-700 dark:text-gray-200">{v.value}</td>
                         <td className="px-2 py-1 text-right font-mono tabular-nums text-gray-500 dark:text-gray-400">{v.count}</td>
-                        <td className="px-2 py-1 text-right font-mono tabular-nums text-gray-700 dark:text-gray-200">{v.mean.toFixed(1)}</td>
-                        <td className="px-2 py-1 text-right font-mono tabular-nums text-gray-500 dark:text-gray-400">{v.p50.toFixed(1)}</td>
-                        <td className="px-2 py-1 text-right font-mono tabular-nums text-gray-500 dark:text-gray-400">{v.p95.toFixed(1)}</td>
-                        <td className="px-2 py-1 text-right font-mono tabular-nums text-gray-500 dark:text-gray-400">{v.p99.toFixed(1)}</td>
+                        <td className="px-2 py-1 text-right font-mono tabular-nums text-gray-700 dark:text-gray-200">{format(v.mean)}</td>
+                        <td className="px-2 py-1 text-right font-mono tabular-nums text-gray-500 dark:text-gray-400">{format(v.p50)}</td>
+                        <td className="px-2 py-1 text-right font-mono tabular-nums text-gray-500 dark:text-gray-400">{format(v.p95)}</td>
+                        <td className="px-2 py-1 text-right font-mono tabular-nums text-gray-500 dark:text-gray-400">{format(v.p99)}</td>
                       </tr>
                     )
                   })}

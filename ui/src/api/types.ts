@@ -782,21 +782,56 @@ export interface TestPipeline {
   tasks: PipelineTaskRow[]
 }
 
-// result.estimate.json, the cost a zkVM prices each test of a suite at.
+// result.estimate.json, the cost a zkVM estimates for each test of a suite.
 export interface TestEstimate {
-  /** Cost per kind, in the unit the zkVM prices in. */
+  /** Cost per kind, in the unit of the zkVM. */
   cost: Record<string, number>
   /** Peak guest heap, absent where the server reported none. */
   peak_heap_bytes?: number
 }
 
 export interface RunEstimate {
+  timestamp: number
+  suite_hash: string
+  instance: {
+    id: string
+    client: string
+  }
+  metadata: {
+    labels?: Record<string, string>
+  }
   zkvm: string
   image: string
+  image_sha256?: string
+  command?: string[]
   elf_url: string
   elf_sha256: string
   /** Keyed by test name. */
   tests: Record<string, TestEstimate>
-  /** Guest error of each test the estimate could not price, keyed by test name. */
+  /** Guest error of each failed test, keyed by test name. */
   failures?: Record<string, string>
+}
+
+// estimates/index.json
+export interface EstimateIndex {
+  generated: number
+  entries: EstimateIndexEntry[]
+}
+
+export interface EstimateIndexEntry {
+  estimate_id: string
+  timestamp: number
+  suite_hash: string
+  instance: {
+    id: string
+    client: string
+  }
+  metadata?: Record<string, string>
+  image: string
+  tests: {
+    tests_passed: number
+    tests_failed: number
+  }
+  /** Cost per kind, summed over the passed tests. */
+  cost: Record<string, number>
 }

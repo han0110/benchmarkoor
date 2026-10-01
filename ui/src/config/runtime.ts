@@ -77,6 +77,7 @@ export function isIndexingEnabled(config: RuntimeConfig): boolean {
 
 // Maps runId/suiteHash → discovery path for S3 routing
 const discoveryPathMap = new Map<string, string>()
+export const hasDiscoveryMapping = (key: string): boolean => discoveryPathMap.has(key)
 
 export function registerDiscoveryMapping(key: string, discoveryPath: string): void {
   discoveryPathMap.set(key, discoveryPath)
@@ -105,7 +106,7 @@ export function getDataUrl(path: string, config: RuntimeConfig): string {
   if ((isS3Mode(config) || isLocalMode(config)) && config.api?.baseUrl) {
     const runMatch = path.match(/^runs\/([^/]+)/)
     const suiteMatch = path.match(/^suites\/([^/]+)/)
-    const key = runMatch?.[1] ?? suiteMatch?.[1]
+    const key = runMatch?.[1] ?? suiteMatch?.[1] ?? path.match(/^estimates\/([^/]+)/)?.[1]
     const dp = key ? getDiscoveryPath(key, config) : getDiscoveryPath('', config)
     return `${config.api.baseUrl}/api/v1/files/${dp}/${path}`
   }

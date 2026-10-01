@@ -8,6 +8,7 @@ import { Badge } from '@/components/shared/Badge'
 import { Duration } from '@/components/shared/Duration'
 import { JDenticon } from '@/components/shared/JDenticon'
 import { StrategyIcon } from '@/components/shared/StrategyIcon'
+import { EstimateColumnCell, EstimateColumnHeader } from '@/components/estimates/EstimateColumn'
 import { Tag } from 'lucide-react'
 import { formatTimestampDate, formatTimestampTime, formatRelativeTime } from '@/utils/date'
 import { formatDuration, formatNumber } from '@/utils/format'
@@ -49,7 +50,7 @@ function SortIcon({ direction, active }: { direction: SortDirection; active: boo
   )
 }
 
-function SortableHeader({
+export function SortableHeader({
   label,
   shortLabel,
   column,
@@ -83,7 +84,7 @@ function SortableHeader({
   )
 }
 
-function SuiteCell({ suiteHash }: { suiteHash: string }) {
+export function SuiteCell({ suiteHash }: { suiteHash: string }) {
   const { data: suiteInfo } = useSuite(suiteHash)
   const name = suiteInfo?.metadata?.labels?.name
   const labels = suiteInfo?.metadata?.labels
@@ -172,6 +173,7 @@ export function RunsTable({
             <SortableHeader label="F" column="failed" currentSort={sortBy} currentDirection={sortDir} onSort={handleSort} className="px-1.5 py-2 sm:px-2 sm:py-2" />
             <SortableHeader label="P" column="passed" currentSort={sortBy} currentDirection={sortDir} onSort={handleSort} className="px-1.5 py-2 sm:px-2 sm:py-2" />
             <SortableHeader label="T" column="total" currentSort={sortBy} currentDirection={sortDir} onSort={handleSort} className="px-1.5 py-2 sm:px-2 sm:py-2" />
+            <EstimateColumnHeader />
             <th className="w-8 px-1 py-2" />
           </tr>
         </thead>
@@ -187,7 +189,7 @@ export function RunsTable({
             const entryLabels = entry.metadata
               ? Object.entries(entry.metadata).filter(([k]) => !k.startsWith('github.') && k !== 'name')
               : []
-            const colSpan = (selectable ? 1 : 0) + 3 + (showSuite ? 1 : 0) + 6
+            const colSpan = (selectable ? 1 : 0) + 3 + (showSuite ? 1 : 0) + 7
             // Live (in-progress) runs are not selectable for compare or
             // delete: comparison needs finished per-test results, and
             // deletion mustn't race with the active runner.
@@ -360,6 +362,7 @@ export function RunsTable({
                   </>
                 )
               })()}
+              <EstimateColumnCell runId={entry.run_id} />
               <td className="relative z-10 px-1 py-2 text-center">
                 {entryLabels.length > 0 && (
                   <div className="group/tag relative inline-block">

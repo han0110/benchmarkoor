@@ -48,7 +48,7 @@ function ChevronIcon() {
   )
 }
 
-function FilterDropdown<T extends string>({
+export function FilterDropdown<T extends string>({
   label,
   value,
   onChange,

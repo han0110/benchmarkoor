@@ -1,16 +1,10 @@
 import type { RunEstimate, SuiteTest } from '@/api/types'
 import { compileQuery } from './eestNameFilter'
-import { formatDurationMs } from './format'
+import { formatDurationMs, formatNumber } from './format'
 
-/** Sums the cost kinds, in the unit the zkVM prices in. */
+/** Sums the cost kinds, in the unit of the zkVM. */
 export function costTotal(cost: Record<string, number>): number {
   return Object.values(cost).reduce((sum, value) => sum + value, 0)
-}
-
-/** Share one kind takes of a cost. Undefined where the cost is zero and no kind holds a share of it. */
-export function costShare(cost: Record<string, number>, kind: string): number | undefined {
-  const total = costTotal(cost)
-  return total === 0 ? undefined : (cost[kind] ?? 0) / total
 }
 
 /** Every cost kind the estimates name, in the order the kinds are first seen. */
@@ -37,10 +31,10 @@ export function reportsHeap(estimate: RunEstimate): boolean {
   return Object.values(estimate.tests).some((test) => test.peak_heap_bytes != null)
 }
 
-/** Reports whether one zkVM priced every estimate. */
-export function sameZkvm(estimates: (RunEstimate | null)[]): boolean {
-  const zkvms = estimates.flatMap((estimate) => (estimate ? [estimate.zkvm] : []))
-  return zkvms.every((zkvm) => zkvm === zkvms[0])
+/** Reports whether the estimates share the zkvm label, which puts their costs on one scale whatever the zkvm_version. */
+export function sameZkvm(estimates: RunEstimate[]): boolean {
+  const [first, ...rest] = estimates.map((estimate) => estimate.metadata.labels?.zkvm)
+  return rest.every((zkvm) => zkvm === first)
 }
 
 export interface FitPoint {
@@ -127,12 +121,12 @@ export function fitted(points: FitPoint[], model: FitModelKey): Fit {
   }
 }
 
-/** One test the estimate prices and the block logs time. */
+/** One estimated test that the block logs time. */
 export interface CostPoint extends FitPoint {
   testName: string
 }
 
-/** The page filters, so every panel of a run reads the same tests. */
+/** The page filters, so every panel of the page reads the same tests. */
 interface TestFilter {
   /** Only tests whose name matches this query are read. */
   searchQuery?: string
@@ -146,7 +140,28 @@ export function keptTests(names: string[], { searchQuery, includeTest }: TestFil
   return names.filter((name) => matches(name) && (!includeTest || includeTest(name)))
 }
 
-/** One test priced by kind, in the order the run executed the tests. */
+/** The 1-based position of each suite test, and a comparator in suite order. The comparator puts the tests the suite does not list last, in name order. */
+export function suiteOrder(suiteTests: SuiteTest[] | undefined) {
+  const positions = new Map(suiteTests?.map((test, position) => [test.name, position + 1]))
+  const positionOf = (testName: string) => positions.get(testName) ?? Number.MAX_SAFE_INTEGER
+
+  return { positions, compare: (left: string, right: string) => positionOf(left) - positionOf(right) || left.localeCompare(right) }
+}
+
+/** The items in the order of the value, an item without the value going last whichever way the sort runs. Numeric collation puts v1.10.0 after v1.9.0. */
+export function sortNullsLast<Item>(items: Item[], valueOf: (item: Item) => number | string | null, direction: 'asc' | 'desc'): Item[] {
+  const sign = direction === 'asc' ? 1 : -1
+
+  return [...items].sort((a, b) => {
+    const left = valueOf(a)
+    const right = valueOf(b)
+    if (left === null || right === null) return left === right ? 0 : left === null ? 1 : -1
+
+    return (typeof left === 'string' ? left.localeCompare(right as string, undefined, { numeric: true }) : left - (right as number)) * sign
+  })
+}
+
+/** One estimated test with its cost by kind, in suite order. */
 export interface CostDataPoint {
   testIndex: number
   testNumber: number
@@ -162,30 +177,21 @@ interface CostPointOptions extends TestFilter {
   suiteTests?: SuiteTest[]
 }
 
-/** The priced tests the page filters keep, in run order, the tests the suite does not list going last. */
+/** The estimated tests the page filters keep, in run order, the tests the suite does not list going last. */
 export function costPoints(
   estimate: RunEstimate,
   kinds: string[],
   { suiteTests, ...filter }: CostPointOptions = {},
 ): CostDataPoint[] {
-  const order = new Map<string, number>()
-  suiteTests?.forEach((test, position) => {
-    order.set(test.name, position + 1)
-  })
+  const { positions, compare } = suiteOrder(suiteTests)
 
   return keptTests(Object.keys(estimate.tests), filter)
-    .sort((left, right) => {
-      const leftOrder = order.get(left) ?? Number.MAX_SAFE_INTEGER
-      const rightOrder = order.get(right) ?? Number.MAX_SAFE_INTEGER
-      if (leftOrder !== rightOrder) return leftOrder - rightOrder
-
-      return left.localeCompare(right)
-    })
+    .sort(compare)
     .map((testName, position) => {
       const test = estimate.tests[testName]
       return {
         testIndex: position + 1,
-        testNumber: order.get(testName) ?? position + 1,
+        testNumber: positions.get(testName) ?? position + 1,
         testName,
         costs: kinds.map((kind) => test.cost[kind] ?? 0),
         total: costTotal(test.cost),
@@ -209,6 +215,17 @@ export function formatCost(value: number): string {
   return value.toFixed(0)
 }
 
+/** The cost of a text in the SI steps of formatCost in either case, or as a plain number, rounded to an integer. Other text has no cost. */
+export function parseCost(text: string): number | undefined {
+  const trimmed = text.trim().toLowerCase()
+  const [limit, suffix] = SI_STEPS.find((step) => trimmed.endsWith(step[1].toLowerCase())) ?? [1, '']
+  const digits = trimmed.slice(0, trimmed.length - suffix.length)
+  return /^\d+(\.\d+)?$/.test(digits) ? Math.round(Number(digits) * limit) : undefined
+}
+
+/** The title of a cost, the cost rounded to an integer. A null cost has no title. */
+export const costTitle = (cost: number | null): string | undefined => (cost === null ? undefined : formatNumber(Math.round(cost)))
+
 /** The slope, as the seconds a billion of cost takes. */
 export const formatRate = (slope: number): string => `${((slope * COST_UNIT) / 1000).toFixed(3)} s/G`
 
@@ -218,8 +235,14 @@ export const formatSignedDuration = (milliseconds: number): string =>
 
 export const formatPercent = (share: number): string => `${(share * 100).toFixed(1)}%`
 
-export const formatSignedPercent = (share: number): string =>
-  `${share < 0 ? '-' : '+'}${formatPercent(Math.abs(share))}`
+export const formatSignedPercent = (share: number): string => formatSigned(share, formatPercent)
+
+/** A ratio, with fewer decimals as it grows. */
+export const formatRatio = (ratio: number): string => `${ratio.toFixed(ratio < 10 ? 2 : ratio < 100 ? 1 : 0)}x`
+
+/** A value with its sign in front of the formatted magnitude, because formatBytes prints a negative value in raw bytes. */
+export const formatSigned = (value: number, format: (magnitude: number) => string): string =>
+  `${value < 0 ? '-' : '+'}${format(Math.abs(value))}`
 
 /** Classes a signed share prints in, matching the comparison deltas. */
 export const deviationClass = (share: number): string =>
@@ -228,3 +251,10 @@ export const deviationClass = (share: number): string =>
     : share < 0
       ? 'text-green-600 dark:text-green-400'
       : 'text-red-600 dark:text-red-400'
+
+/** Distance from 1 within which a ratio reads as neither cheaper nor dearer. */
+export const NEUTRAL_BAND = 0.02
+
+/** Classes a ratio prints in, gray within the neutral band. The check reads the two band edges, because 0.98 - 1 falls outside the band in floating point. */
+export const ratioClass = (ratio: number): string =>
+  deviationClass(ratio < 1 - NEUTRAL_BAND ? -1 : ratio > 1 + NEUTRAL_BAND ? 1 : 0)

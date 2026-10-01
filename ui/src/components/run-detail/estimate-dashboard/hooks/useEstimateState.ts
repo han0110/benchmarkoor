@@ -10,6 +10,8 @@ interface EstimateSearch {
   ecCategories?: string // Comma-separated list of categories
   ecMin?: number
   ecMax?: number
+  ecCostMin?: number
+  ecCostMax?: number
   ecSortBy?: EstimateSortField
   ecSortOrder?: SortOrder
   ecShare?: boolean
@@ -20,10 +22,10 @@ interface EstimateSearch {
 const DEFAULT_STATE: EstimateState = {
   activeTab: 'overview',
   categories: [], // Empty means all
-  // The largest errors lead, so the tests the estimate misses most read first.
-  sortBy: 'error',
+  // The most expensive tests lead.
+  sortBy: 'cost',
   sortOrder: 'desc',
-  costShare: false,
+  costShare: true,
   signedError: false,
   fitModel: FIT_MODELS[0].value,
 }
@@ -34,6 +36,8 @@ const PARAMS: { [K in keyof EstimateState]-?: keyof EstimateSearch } = {
   categories: 'ecCategories',
   minThroughput: 'ecMin',
   maxThroughput: 'ecMax',
+  minCost: 'ecCostMin',
+  maxCost: 'ecCostMax',
   sortBy: 'ecSortBy',
   sortOrder: 'ecSortOrder',
   costShare: 'ecShare',
@@ -41,23 +45,26 @@ const PARAMS: { [K in keyof EstimateState]-?: keyof EstimateSearch } = {
   fitModel: 'ecFit',
 }
 
-export function useEstimateState(runId: string) {
+export function useEstimateState() {
   const navigate = useNavigate()
-  const search = useSearch({ from: '/runs/$runId' }) as EstimateSearch & Record<string, unknown>
+  const search = useSearch({ strict: false }) as EstimateSearch & Record<string, unknown>
 
+  const categories = useMemo(() => parseCategories(search.ecCategories), [search.ecCategories])
   const state = useMemo<EstimateState>(
     () => ({
       activeTab: search.ecTab ?? DEFAULT_STATE.activeTab,
-      categories: parseCategories(search.ecCategories),
+      categories,
       minThroughput: search.ecMin,
       maxThroughput: search.ecMax,
+      minCost: search.ecCostMin,
+      maxCost: search.ecCostMax,
       sortBy: search.ecSortBy ?? DEFAULT_STATE.sortBy,
       sortOrder: search.ecSortOrder ?? DEFAULT_STATE.sortOrder,
       costShare: search.ecShare ?? DEFAULT_STATE.costShare,
       signedError: search.ecSigned ?? DEFAULT_STATE.signedError,
       fitModel: search.ecFit ?? DEFAULT_STATE.fitModel,
     }),
-    [search],
+    [search, categories],
   )
 
   const updateState = useCallback(
@@ -74,13 +81,9 @@ export function useEstimateState(runId: string) {
         }
       }
 
-      navigate({
-        to: '/runs/$runId',
-        params: { runId },
-        search: nextSearch,
-      })
+      navigate({ to: '.', search: nextSearch })
     },
-    [navigate, runId, search, state],
+    [navigate, search, state],
   )
 
   return { state, updateState }

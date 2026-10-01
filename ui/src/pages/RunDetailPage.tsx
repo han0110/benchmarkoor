@@ -15,7 +15,6 @@ import { GitHubSection } from '@/components/run-detail/GitHubSection'
 import { FilesPanel } from '@/components/run-detail/FilesPanel'
 import { ResourceUsageCharts } from '@/components/run-detail/ResourceUsageCharts'
 import { RemoteMetricsCharts } from '@/components/run-detail/RemoteMetricsCharts'
-import { EstimateDashboard } from '@/components/run-detail/estimate-dashboard'
 import { TestsTable, type TestSortColumn, type TestSortDirection, type TestStatusFilter } from '@/components/run-detail/TestsTable'
 import { PreRunStepsTable } from '@/components/run-detail/PreRunStepsTable'
 import { TestHeatmap, TEST_MODAL_TABS, type SortMode, type GroupMode, type TestModalTab } from '@/components/run-detail/TestHeatmap'
@@ -26,6 +25,7 @@ import { ErrorState } from '@/components/shared/ErrorState'
 import { ClientStat } from '@/components/shared/ClientStat'
 import { Duration } from '@/components/shared/Duration'
 import { JDenticon } from '@/components/shared/JDenticon'
+import { CrossLink } from '@/components/estimates/CrossLink'
 import { StatusAlert } from '@/components/shared/StatusBadge'
 import { FilterInput } from '@/components/shared/FilterInput'
 import { FacetPanel } from '@/components/shared/FacetPanel'
@@ -41,7 +41,6 @@ import { ClientRunsStrip } from '@/components/run-detail/ClientRunsStrip'
 import { BlockLogsDashboard } from '@/components/run-detail/block-logs-dashboard'
 import { isProvingRun } from '@/utils/blockLogs'
 import { useBlockLogs } from '@/api/hooks/useBlockLogs'
-import { useEstimate } from '@/api/hooks/useEstimate'
 import { useDeviceMetrics, useNodeMetrics } from '@/api/hooks/useRemoteMetrics'
 import { Flame, Download, SquareStack, GitCompareArrows, Trash2 } from 'lucide-react'
 import { MAX_COMPARE_RUNS, MIN_COMPARE_RUNS } from '@/components/compare/constants'
@@ -191,7 +190,6 @@ export function RunDetailPage() {
     enabled: !!runId,
   })
   const { data: blockLogs } = useBlockLogs(runId)
-  const { data: estimate } = useEstimate(runId)
   const { data: deviceMetrics } = useDeviceMetrics(runId)
   const { data: nodeMetrics } = useNodeMetrics(runId)
   const { data: stateActorManifest } = useStateActorManifest(runId, fetchOnDisk)
@@ -480,6 +478,7 @@ export function RunDetailPage() {
             </>
           )}
           <span className="truncate text-gray-900 dark:text-gray-100">{runId}</span>
+          <CrossLink id={runId} target="estimate" />
           {isAdmin && (
             <button
               disabled={deleteRuns.isPending}
@@ -939,20 +938,6 @@ export function RunDetailPage() {
             statusFilter={status}
             onTestClick={handleTestModalChange}
           />
-
-          {estimate && (
-            <EstimateDashboard
-              estimate={estimate}
-              blockLogs={blockLogs}
-              runId={runId}
-              isProving={isProvingRun(config)}
-              suiteTests={mergedSuiteTests ?? suite?.tests}
-              searchQuery={q}
-              tests={result.tests}
-              statusFilter={status}
-              onTestClick={handleTestModalChange}
-            />
-          )}
 
           {result.pre_run_steps && Object.keys(result.pre_run_steps).length > 0 && (
             <PreRunStepsTable

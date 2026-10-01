@@ -12,6 +12,7 @@ import { ComparePage } from '@/pages/ComparePage'
 import { CompareGroupsPage } from '@/pages/CompareGroupsPage'
 import { ApiDocsPage } from '@/pages/ApiDocsPage'
 import { QueryBuilderPage } from '@/pages/QueryBuilderPage'
+import { estimateRoutes } from '@/estimateRoutes'
 
 const rootRoute = createRootRoute({
   component: RootLayout,
@@ -104,6 +105,7 @@ const routeTree = rootRoute.addChildren([
   fileViewerRoute,
   suitesRoute,
   suiteDetailRoute,
+  ...estimateRoutes(rootRoute),
   loginRoute,
   adminRoute,
   apiKeysRoute,

@@ -3,18 +3,30 @@ import type { RunEstimate } from '@/api/types'
 import {
   costKinds,
   costPoints,
-  costShare,
   costTotal,
   fitted,
   formatCost,
   formatRate,
+  formatRatio,
+  formatSigned,
+  parseCost,
+  ratioClass,
+  sameZkvm,
   sharedTestNames,
   type FitPoint,
 } from './estimate'
+import { formatBytes } from './format'
 
 const point = (cost: number, timeMs: number): FitPoint => ({ cost, timeMs })
 
-const estimate = (tests: RunEstimate['tests']): RunEstimate => ({
+const estimate = (
+  tests: RunEstimate['tests'],
+  labels: Record<string, string> = { zkvm: 'openvm', zkvm_version: 'v2.1.0-preview' },
+): RunEstimate => ({
+  timestamp: 1790390784,
+  suite_hash: 'f585281e3fea89a8',
+  instance: { id: 'reth-openvm', client: 'provoor' },
+  metadata: { labels },
   zkvm: 'openvm',
   image: 'ghcr.io/eth-act/ere/ere-server-openvm:0.18.0',
   elf_url: 'https://example.invalid/guest.elf',
@@ -35,17 +47,6 @@ describe('costTotal', () => {
   }
 })
 
-describe('costShare', () => {
-  it('takes the kind against the total of the test', () => {
-    expect(costShare({ rv64: 3, system: 1 }, 'rv64')).toBe(0.75)
-    expect(costShare({ rv64: 3, system: 1 }, 'precompile')).toBe(0)
-  })
-
-  it('states no share where the test costs nothing', () => {
-    expect(costShare({ rv64: 0 }, 'rv64')).toBeUndefined()
-  })
-})
-
 describe('costKinds', () => {
   it('lists every kind in the order they are first seen', () => {
     const runs = [estimate({ a: { cost: { rv64: 2, precompile: 1 } } }), estimate({ a: { cost: { rv64: 2, system: 4 } } })]
@@ -60,6 +61,18 @@ describe('sharedTestNames', () => {
       estimate({ a: { cost: { rv64: 1 } }, b: { cost: { rv64: 1 } } }),
     ]
     expect(sharedTestNames(runs)).toEqual(['a', 'b'])
+  })
+})
+
+describe('sameZkvm', () => {
+  const labelled = (zkvm: string, zkvmVersion: string) => estimate({}, { zkvm, zkvm_version: zkvmVersion })
+
+  it('holds where the estimates share the zkvm, whatever the version', () => {
+    expect(sameZkvm([labelled('zisk', 'v1.3.0-alpha'), labelled('zisk', 'v1.2.0-alpha')])).toBe(true)
+  })
+
+  it('fails on another zkvm', () => {
+    expect(sameZkvm([labelled('zisk', 'v1.3.0-alpha'), labelled('openvm', 'v1.3.0-alpha')])).toBe(false)
   })
 })
 
@@ -107,7 +120,7 @@ describe('fitted', () => {
 })
 
 describe('costPoints', () => {
-  const priced = estimate({
+  const estimated = estimate({
     late: { cost: { rv64: 3 } },
     unlisted: { cost: { rv64: 2 } },
     early: { cost: { rv64: 1, precompile: 2 }, peak_heap_bytes: 4096 },
@@ -115,8 +128,8 @@ describe('costPoints', () => {
   const kinds = ['rv64', 'precompile']
   const suiteTests = [{ name: 'early' }, { name: 'late' }]
 
-  it('prices the tests in the order the suite ran them, the ones it does not list going last', () => {
-    const points = costPoints(priced, kinds, { suiteTests })
+  it('orders the estimated tests as the suite ran them, the ones it does not list going last', () => {
+    const points = costPoints(estimated, kinds, { suiteTests })
 
     expect(points.map((point) => point.testName)).toEqual(['early', 'late', 'unlisted'])
     expect(points.map((point) => point.testNumber)).toEqual([1, 2, 3])
@@ -124,10 +137,10 @@ describe('costPoints', () => {
     expect(points[1].peakHeapBytes).toBeNull()
   })
 
-  it('prices only the tests the page filters keep', () => {
-    expect(costPoints(priced, kinds, { searchQuery: 'late' }).map((point) => point.testName)).toEqual(['late'])
-    expect(costPoints(priced, kinds, { includeTest: (name) => name === 'early' }).map((point) => point.testName)).toEqual(['early'])
-    expect(costPoints(priced, kinds).map((point) => point.testName)).toEqual(['early', 'late', 'unlisted'])
+  it('reads only the tests the page filters keep', () => {
+    expect(costPoints(estimated, kinds, { searchQuery: 'late' }).map((point) => point.testName)).toEqual(['late'])
+    expect(costPoints(estimated, kinds, { includeTest: (name) => name === 'early' }).map((point) => point.testName)).toEqual(['early'])
+    expect(costPoints(estimated, kinds).map((point) => point.testName)).toEqual(['early', 'late', 'unlisted'])
   })
 })
 
@@ -148,9 +161,69 @@ describe('formatCost', () => {
   }
 })
 
+describe('parseCost', () => {
+  const cases: [string, number | undefined][] = [
+    ['1.73T', 1.73e12],
+    ['300.00G', 3e11],
+    [' 2.5M ', 2_500_000],
+    // The product of 2.01 and 1e3 falls below 2010 in floating point.
+    ['2.01k', 2010],
+    ['300g', 3e11],
+    ['1.5K', 1500],
+    ['999', 999],
+    ['', undefined],
+    ['G', undefined],
+    ['abc', undefined],
+  ]
+
+  for (const [text, want] of cases) {
+    it(`reads '${text}' as ${want}`, () => {
+      expect(parseCost(text)).toBe(want)
+    })
+  }
+})
+
 describe('formatRate', () => {
   it('states the seconds a billion of cost takes', () => {
     expect(formatRate(8.4e-8)).toBe('0.084 s/G')
     expect(formatRate(2e-6)).toBe('2.000 s/G')
   })
+})
+
+describe('formatRatio', () => {
+  const cases: [number, string][] = [
+    [1.0567, '1.06x'],
+    [12.34, '12.3x'],
+    [123.4, '123x'],
+  ]
+
+  for (const [value, want] of cases) {
+    it(`prints ${want}`, () => {
+      expect(formatRatio(value)).toBe(want)
+    })
+  }
+})
+
+describe('formatSigned', () => {
+  it('prints the sign before the formatted magnitude', () => {
+    expect(formatSigned(-12_300_000_000, formatCost)).toBe('-12.30G')
+    expect(formatSigned(-2048, formatBytes)).toBe('-2.0 KB')
+    expect(formatSigned(1500, formatCost)).toBe('+1.50k')
+  })
+})
+
+describe('ratioClass', () => {
+  // The band edges read neutral.
+  const cases: [number, string][] = [
+    [0.97, 'green'],
+    [0.98, 'gray'],
+    [1.02, 'gray'],
+    [1.03, 'red'],
+  ]
+
+  for (const [ratio, hue] of cases) {
+    it(`prints ${ratio} in ${hue}`, () => {
+      expect(ratioClass(ratio)).toContain(`text-${hue}-`)
+    })
+  }
 })

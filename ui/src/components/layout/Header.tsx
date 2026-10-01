@@ -326,6 +326,7 @@ export function Header() {
         {/* Desktop nav */}
         <nav className="hidden items-center gap-1 md:flex">
           <NavLink to="/runs">Runs</NavLink>
+          <NavLink to="/estimates">Estimates</NavLink>
           <NavLink to="/suites">Suites</NavLink>
         </nav>
         <div className="ml-auto hidden items-center gap-2 md:flex">
@@ -348,6 +349,7 @@ export function Header() {
         <div className="border-t border-gray-200 px-4 py-3 dark:border-gray-700 md:hidden">
           <nav className="flex flex-col gap-1">
             <NavLink to="/runs" onClick={closeMobile}>Runs</NavLink>
+            <NavLink to="/estimates" onClick={closeMobile}>Estimates</NavLink>
             <NavLink to="/suites" onClick={closeMobile}>Suites</NavLink>
           </nav>
           <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700">

@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { compositionDonutOption, kindColor } from '@/components/shared/costCompositionChart'
 import { useNameDisplayMode } from '@/hooks/useNameDisplayMode'
 import { formatBytes } from '@/utils/format'
-import { formatCost, formatPercent } from '@/utils/estimate'
+import { costTitle, formatCost, formatPercent } from '@/utils/estimate'
 import { ChartSection, StatCard } from '../../RemoteMetricsPanel'
 import { chartFrame, useChartOptionBuilder } from '../../remoteMetricsChart'
 import type { EstimateRow } from '../types'
@@ -25,7 +25,7 @@ interface OverviewTabProps {
   onTestClick?: (testName: string) => void
 }
 
-/** States what the price of a test is made of and how much heap the guest held. */
+/** States what the estimated cost of a test is made of and how much heap the guest held. */
 export function OverviewTab({ rows, kinds, isDark, onTestClick }: OverviewTabProps) {
   const { mode: nameMode } = useNameDisplayMode()
   const [zoomRange, setZoomRange] = useState({ start: 0, end: 100 })
@@ -107,13 +107,13 @@ export function OverviewTab({ rows, kinds, isDark, onTestClick }: OverviewTabPro
                       {kind}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-3 py-1.5 text-right text-sm/6 text-gray-900 dark:text-gray-100">{formatCost(componentCosts[at])}</td>
+                  <td title={costTitle(componentCosts[at])} className="whitespace-nowrap px-3 py-1.5 text-right text-sm/6 text-gray-900 dark:text-gray-100">{formatCost(componentCosts[at])}</td>
                   <td className="whitespace-nowrap px-3 py-1.5 text-right text-sm/6 text-gray-500 dark:text-gray-400">{formatPercent(componentCosts[at] / (componentTotal || 1))}</td>
                 </tr>
               ))}
               <tr className="border-t-2 border-gray-300 dark:border-gray-600">
                 <td className="whitespace-nowrap px-3 py-1.5 text-sm/6 font-semibold text-gray-900 dark:text-gray-100">Total</td>
-                <td className="whitespace-nowrap px-3 py-1.5 text-right text-sm/6 font-semibold text-gray-900 dark:text-gray-100">{formatCost(componentTotal)}</td>
+                <td title={costTitle(componentTotal)} className="whitespace-nowrap px-3 py-1.5 text-right text-sm/6 font-semibold text-gray-900 dark:text-gray-100">{formatCost(componentTotal)}</td>
                 <td className="whitespace-nowrap px-3 py-1.5 text-right text-sm/6 font-semibold text-gray-900 dark:text-gray-100">{formatPercent(1)}</td>
               </tr>
             </tbody>

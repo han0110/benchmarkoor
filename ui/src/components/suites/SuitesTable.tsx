@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import clsx from 'clsx'
 import { useSuite } from '@/api/hooks/useSuite'
+import { SuiteEstimateCount } from '@/components/estimates/EstimatesList'
 import { Badge } from '@/components/shared/Badge'
 import { JDenticon } from '@/components/shared/JDenticon'
 import { SourceBadge } from '@/components/shared/SourceBadge'
@@ -154,6 +155,9 @@ function SuiteRow({ suite, isInactive, hidden }: { suite: SuiteEntry; isInactive
       <td className="whitespace-nowrap px-3 py-2 text-right sm:px-4 sm:py-2.5">
         <Badge variant="info">{suite.runCount}</Badge>
       </td>
+      <td className="whitespace-nowrap px-3 py-2 text-right sm:px-4 sm:py-2.5">
+        <Badge variant="info"><SuiteEstimateCount suiteHash={suite.hash} /></Badge>
+      </td>
     </tr>
   )
 }
@@ -202,7 +206,7 @@ export function SuitesTable({
   return (
     <div className="overflow-x-auto rounded-xs bg-white shadow-xs dark:bg-gray-800">
       <table className="min-w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
-        <colgroup><col className="w-28" /><col /><col className="w-32" /><col className="w-28" /><col className="w-32" /><col className="w-24" /></colgroup>
+        <colgroup><col className="w-28" /><col /><col className="w-32" /><col className="w-28" /><col className="w-32" /><col className="w-24" /><col className="w-28" /></colgroup>
         <thead className="bg-gray-50 dark:bg-gray-900">
           <tr>
             <SortableHeader label="Last Run" column="lastRun" currentSort={sortBy} currentDirection={sortDir} onSort={handleSort} />
@@ -211,6 +215,7 @@ export function SuitesTable({
             <StaticHeader label="Pre-Run Steps" />
             <StaticHeader label="Filter" />
             <SortableHeader label="Runs" column="runs" currentSort={sortBy} currentDirection={sortDir} onSort={handleSort} />
+            <th className="px-3 py-2 text-left text-xs/5 font-medium uppercase tracking-wider text-gray-500 sm:px-4 dark:text-gray-400">Estimates</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200 dark:divide-gray-700">

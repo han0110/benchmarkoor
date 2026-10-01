@@ -1,11 +1,7 @@
 import { useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { BarChart3, ChevronDown, ChevronUp, Table2, X } from 'lucide-react'
-import type { RunEstimate } from '@/api/types'
-import { SegmentedControl } from '@/components/shared/SegmentedControl'
 import { parseEESTName } from '@/utils/eestName'
-import { formatBytes } from '@/utils/format'
-import { costTotal, formatCost, reportsHeap, sameZkvm } from '@/utils/estimate'
 import { queryTermDimension, searchQueryContains, splitQuery } from '@/utils/eestNameFilter'
 import { type StepTypeOption, getAggregatedStats } from '@/pages/RunDetailPage'
 import { type CompareRun, type LabelMode, RUN_SLOTS, formatRunLabel } from './constants'
@@ -23,17 +19,7 @@ interface CompareDimensionInsightsProps {
   onToggle: (term: string) => void
   /** Open the test detail modal for a specific test. */
   onTestClick?: (testName: string) => void
-  estimatesPerRun?: (RunEstimate | null)[]
 }
-
-/** Metric the breakdown reads per test. */
-type MetricKey = 'mgas' | 'cost' | 'heap'
-
-const METRIC_OPTIONS: { value: MetricKey; label: string }[] = [
-  { value: 'mgas', label: 'MGas/s' },
-  { value: 'cost', label: 'Estimated Cost' },
-  { value: 'heap', label: 'Peak Heap' },
-]
 
 type DimensionDef = { key: string; label: string; emitKey: string }
 
@@ -126,40 +112,16 @@ export function CompareDimensionInsights({
   query,
   onToggle,
   onTestClick,
-  estimatesPerRun,
 }: CompareDimensionInsightsProps) {
-  const [metric, setMetric] = useState<MetricKey>('mgas')
   const [view, setView] = useState<'bars' | 'table'>('bars')
   const [barsDir, setBarsDir] = useState<'desc' | 'asc'>('desc')
   const [showAllBars, setShowAllBars] = useState(false)
   const [groupByKey, setGroupByKey] = useState<string | null>(null)
   const [tableSort, setTableSort] = useState<SortMode>({ col: `delta_${runs.findIndex((_, i) => i !== baselineIdx) || 0}`, dir: 'asc' })
 
-  // Costs of different zkVMs are not on one scale, and a run without an estimate has no cost at all.
-  // A heap is bytes whatever the zkVM, but only some servers report one.
-  const { costComparable, heapComparable } = useMemo(() => {
-    const estimates = estimatesPerRun ?? []
-    const every = estimates.filter((estimate) => estimate != null).length === runs.length
-    return { costComparable: every && sameZkvm(estimates), heapComparable: every && estimates.every((estimate) => estimate != null && reportsHeap(estimate)) }
-  }, [estimatesPerRun, runs.length])
-  const metricOptions = METRIC_OPTIONS.filter((option) => option.value === 'mgas' || (option.value === 'cost' ? costComparable : heapComparable))
-  const estimateMetric = metric === 'cost' && costComparable ? 'cost' : metric === 'heap' && heapComparable ? 'heap' : null
-
-  // A lower cost or heap is better, so the colour scale reads the negated delta.
-  const metricDeltaColor = (pct: number | undefined) =>
-    deltaColor(estimateMetric && pct !== undefined ? -pct : pct)
-  const formatMean = (mean: number) => (estimateMetric === 'cost' ? formatCost(mean) : estimateMetric === 'heap' ? formatBytes(mean) : mean.toFixed(1))
-
   const dimensions = useMemo<DimensionAgg[]>(() => {
     // 1. Per-run, build per-test mgas samples.
-    const perRunSamples = runs.map((r, i) => {
-      const estimate = estimateMetric ? estimatesPerRun?.[i] : null
-      if (estimate) {
-        return Object.entries(estimate.tests).flatMap(([name, test]) => {
-          const value = estimateMetric === 'cost' ? costTotal(test.cost) : test.peak_heap_bytes
-          return value === undefined || (testNameFilter && !testNameFilter(name)) ? [] : [{ name, mgas: value }]
-        })
-      }
+    const perRunSamples = runs.map((r) => {
       if (!r.result) return [] as { name: string; mgas: number }[]
       const out: { name: string; mgas: number }[] = []
       for (const [name, entry] of Object.entries(r.result.tests)) {
@@ -255,7 +217,7 @@ export function CompareDimensionInsights({
     }
 
     return result
-  }, [runs, stepFilter, testNameFilter, baselineIdx, estimateMetric, estimatesPerRun])
+  }, [runs, stepFilter, testNameFilter, baselineIdx])
 
   // When the filter narrows down to a single unique test across all runs
   // there's nothing to break down — surface a deep-link to the test detail
@@ -298,10 +260,9 @@ export function CompareDimensionInsights({
       const mb = b.perRun[idx]?.mean
       const da = baseA && baseA > 0 && ma !== undefined ? ((ma - baseA) / baseA) * 100 : 0
       const db = baseB && baseB > 0 && mb !== undefined ? ((mb - baseB) / baseB) * 100 : 0
-      const costSign = estimateMetric ? -1 : 1
-      return sign * costSign * (da - db)
+      return sign * (da - db)
     })
-  }, [tableDim, tableSort, baselineIdx, estimateMetric])
+  }, [tableDim, tableSort, baselineIdx])
 
   const handleSort = (col: SortMode['col']) => {
     setTableSort((prev) => {
@@ -370,7 +331,7 @@ export function CompareDimensionInsights({
             const pct = i !== baselineIdx && baseline !== undefined && baseline > 0 && r.mean !== undefined
               ? ((r.mean - baseline) / baseline) * 100
               : undefined
-            const barColor = i === baselineIdx ? slot.color : metricDeltaColor(pct)
+            const barColor = i === baselineIdx ? slot.color : deltaColor(pct)
             return (
               <div key={i} className="grid grid-cols-[8rem_1fr_auto_3rem] items-center gap-2">
                 <span className="flex min-w-0 items-center gap-1 text-[10px]/4 text-gray-500 dark:text-gray-400" title={formatRunLabel(slot, runs[i], labelMode)}>
@@ -389,9 +350,9 @@ export function CompareDimensionInsights({
                   />
                 </span>
                 <span className="font-mono tabular-nums text-gray-600 dark:text-gray-300">
-                  {r.mean !== undefined ? formatMean(r.mean) : '—'}
+                  {r.mean !== undefined ? r.mean.toFixed(1) : '—'}
                 </span>
-                <span className="font-mono tabular-nums text-[10px]/4" style={{ color: i === baselineIdx ? '#9ca3af' : metricDeltaColor(pct) }}>
+                <span className="font-mono tabular-nums text-[10px]/4" style={{ color: i === baselineIdx ? '#9ca3af' : deltaColor(pct) }}>
                   {i === baselineIdx ? '' : formatDelta(pct)}
                 </span>
               </div>
@@ -427,9 +388,6 @@ export function CompareDimensionInsights({
           ({dimensions.length} dimension{dimensions.length === 1 ? '' : 's'}
           {activeTerms.length > 0 && `, ${activeTerms.length} filter${activeTerms.length === 1 ? '' : 's'}`})
         </span>
-        {metricOptions.length > 1 && (
-          <SegmentedControl className="ml-auto" value={metric} onChange={setMetric} options={metricOptions} ariaLabel="Metric" />
-        )}
       </div>
       <div className="flex flex-col gap-3 p-3">
         <div className="flex flex-wrap items-center gap-1.5 text-xs/5">
@@ -617,7 +575,7 @@ export function CompareDimensionInsights({
                       </td>
                       {v.perRun.map((r, i) => (
                         <td key={`run-${i}`} className="px-2 py-1 text-right font-mono tabular-nums text-gray-700 dark:text-gray-200">
-                          {r.mean !== undefined ? formatMean(r.mean) : '—'}
+                          {r.mean !== undefined ? r.mean.toFixed(1) : '—'}
                         </td>
                       ))}
                       {v.perRun.map((r, i) => {
@@ -629,7 +587,7 @@ export function CompareDimensionInsights({
                           <td
                             key={`delta-${i}`}
                             className="px-2 py-1 text-right font-mono tabular-nums"
-                            style={{ color: metricDeltaColor(pct) }}
+                            style={{ color: deltaColor(pct) }}
                           >
                             {formatDelta(pct)}
                           </td>

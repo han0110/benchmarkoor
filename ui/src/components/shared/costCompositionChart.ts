@@ -1,5 +1,5 @@
-import { COMPARISON_COLORS } from '@/components/run-detail/block-logs-dashboard/utils/colors'
-import { formatCost } from '@/utils/estimate'
+import { MAX_COMPARE_RUNS, RUN_SLOTS } from '@/components/compare/constants'
+import { formatCost, formatRatio } from '@/utils/estimate'
 
 interface CompositionBar {
   label: string
@@ -7,8 +7,11 @@ interface CompositionBar {
   components: number[]
 }
 
+/** The slots no compared run takes, so a kind shares no colour with a run or with the green and red of a delta. */
+const KIND_COLORS = RUN_SLOTS.slice(MAX_COMPARE_RUNS).map((slot) => slot.color)
+
 /** Colour a cost kind stacks in, cycling where the kinds outnumber the palette. */
-export const kindColor = (index: number): string => COMPARISON_COLORS[index % COMPARISON_COLORS.length]
+export const kindColor = (index: number): string => KIND_COLORS[index % KIND_COLORS.length]
 
 /** Segments under this share of the longest bar carry no label, there being no room to print one. */
 const LABEL_MIN_FRACTION = 0.08
@@ -22,15 +25,17 @@ interface CompositionArgs {
   isDark: boolean
   /** Labels a segment with its share of the bar rather than with its cost. */
   shares: boolean
+  /** Index of the bar every total states its ratio to. */
+  baselineIndex: number
 }
 
-export function compositionOption({ bars, kinds, isDark, shares }: CompositionArgs) {
+export function compositionOption({ bars, kinds, isDark, shares, baselineIndex }: CompositionArgs) {
   const textColor = isDark ? '#ffffff' : '#374151'
   const axisLineColor = isDark ? '#4b5563' : '#d1d5db'
   const surfaceColor = isDark ? '#374151' : '#f9fafb'
   const totals = bars.map((bar) => bar.components.reduce((sum, value) => sum + value, 0))
   const peak = Math.max(...totals) || 1
-  const cheapest = Math.min(...totals)
+  const baseline = totals[baselineIndex]
 
   const segmentLabel = (params: { value: number; dataIndex: number }) => {
     if (params.value / peak < LABEL_MIN_FRACTION) return ''
@@ -41,7 +46,7 @@ export function compositionOption({ bars, kinds, isDark, shares }: CompositionAr
   const totalLabel = (params: { dataIndex: number }) => {
     const total = totals[params.dataIndex]
     if (bars.length < 2) return formatCost(total)
-    return `${formatCost(total)} / ${cheapest > 0 ? `${(total / cheapest).toFixed(2)}x` : '-'}`
+    return `${formatCost(total)} / ${baseline > 0 ? formatRatio(total / baseline) : '-'}`
   }
 
   return {

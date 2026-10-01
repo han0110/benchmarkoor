@@ -19,7 +19,7 @@ interface RunConfigurationProps {
   deviceMetrics?: DeviceMetrics | null
 }
 
-function CopyButton({ text }: { text: string }) {
+export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -39,7 +39,7 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
-function InfoItem({ label, value }: { label: string; value: string | number }) {
+export function InfoItem({ label, value }: { label: string; value: string | number }) {
   return (
     <div>
       <dt className="text-xs/5 font-medium text-gray-500 dark:text-gray-400">{label}</dt>
