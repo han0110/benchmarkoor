@@ -374,17 +374,6 @@ export function TestHeatmap({
   const groupMode = groupModeProp ?? 'none'
   const threshold = thresholdProp ?? DEFAULT_THRESHOLD
   const [tooltip, setTooltip] = useState<{ test: TestData; x: number; y: number } | null>(null)
-  const [opcodeSort, setOpcodeSort] = useState<OpcodeSortMode>('name')
-  const [activeStepTabLocal, setActiveStepTabLocal] = useState<TestModalTab>('test')
-  const activeStepTab = activeStepTabProp ?? activeStepTabLocal
-  const setActiveStepTab = (tab: TestModalTab) => {
-    setActiveStepTabLocal(tab)
-    onActiveStepTabChange?.(tab)
-  }
-  const { data: blockLogs } = useBlockLogs(runId)
-  // The tab of an artifact the test lacks never opens on an empty body.
-  const testPipeline = useTestPipelineView(runId, selectedTest ?? '')
-  const { data: testRemoteMetrics } = useTestRemoteMetrics(runId, selectedTest ?? '')
 
   // Pop-in stagger state for newly-completed tiles. Populated below by
   // an effect that diffs the latest testData against the previous
@@ -914,9 +903,74 @@ export function TestHeatmap({
         </div>
       )}
 
+      <RunTestDetailModal
+        tests={tests}
+        suiteTests={suiteTests}
+        opcodeDiffByTest={opcodeDiffByTest}
+        runId={runId}
+        suiteHash={suiteHash}
+        selectedTest={selectedTest}
+        searchQuery={searchQuery}
+        postTestRPCCalls={postTestRPCCalls}
+        onSelectedTestChange={onSelectedTestChange}
+        onSearchChange={onSearchChange}
+        activeStepTab={activeStepTabProp}
+        onActiveStepTabChange={onActiveStepTabChange}
+        expandedExecRows={expandedExecRows}
+        onExpandedExecRowsChange={onExpandedExecRowsChange}
+      />
+    </div>
+  )
+}
+
+export function RunTestDetailModal({
+  tests,
+  suiteTests,
+  opcodeDiffByTest,
+  runId,
+  suiteHash,
+  selectedTest,
+  searchQuery = '',
+  postTestRPCCalls,
+  onSelectedTestChange,
+  onSearchChange,
+  activeStepTab: activeStepTabProp,
+  onActiveStepTabChange,
+  expandedExecRows,
+  onExpandedExecRowsChange,
+}: Pick<TestHeatmapProps, 'tests' | 'suiteTests' | 'opcodeDiffByTest' | 'runId' | 'suiteHash' | 'selectedTest' | 'searchQuery' | 'postTestRPCCalls' | 'onSelectedTestChange' | 'onSearchChange' | 'activeStepTab' | 'onActiveStepTabChange' | 'expandedExecRows' | 'onExpandedExecRowsChange'>) {
+  const [opcodeSort, setOpcodeSort] = useState<OpcodeSortMode>('name')
+  const [activeStepTabLocal, setActiveStepTabLocal] = useState<TestModalTab>('test')
+  const activeStepTab = activeStepTabProp ?? activeStepTabLocal
+  const setActiveStepTab = (tab: TestModalTab) => {
+    setActiveStepTabLocal(tab)
+    onActiveStepTabChange?.(tab)
+  }
+  const { data: blockLogs } = useBlockLogs(runId)
+  // The tab of an artifact the test lacks never opens on an empty body.
+  const testPipeline = useTestPipelineView(runId, selectedTest ?? '')
+  const { data: testRemoteMetrics } = useTestRemoteMetrics(runId, selectedTest ?? '')
+
+  const executionOrder = useMemo(() => {
+    if (!suiteTests) return new Map<string, number>()
+    return new Map(suiteTests.map((test, index) => [test.name, index + 1]))
+  }, [suiteTests])
+
+  const genesisMap = useMemo(() => {
+    if (!suiteTests) return new Map<string, string>()
+    const m = new Map<string, string>()
+    for (const test of suiteTests) {
+      if (test.genesis) m.set(test.name, test.genesis)
+    }
+    return m
+  }, [suiteTests])
+
+  return (
+    <>
       {/* Test Detail Modal */}
-      {selectedTest && tests[selectedTest] && (() => {
-        const entry = tests[selectedTest]
+      {selectedTest && (tests[selectedTest] || !runId) && (() => {
+        // Without a run, the modal shows the suite details of any test.
+        const entry: TestEntry | undefined = tests[selectedTest]
         return (
           <Modal
             isOpen={!!selectedTest}
@@ -937,7 +991,7 @@ export function TestHeatmap({
                     />
                   </div>
                 </div>
-                {entry.dir && (
+                {entry?.dir && (
                   <div>
                     <div className="text-xs/5 font-medium text-gray-500 dark:text-gray-400">Directory</div>
                     <div className="flex items-center gap-2 text-sm/6 text-gray-900 dark:text-gray-100">
@@ -984,7 +1038,7 @@ export function TestHeatmap({
                 <BlockLogDetails blockLog={blockLogs[selectedTest]} />
               )}
               {(() => {
-                const steps = suiteHash && entry.steps
+                const steps = suiteHash && entry?.steps
                   ? [
                       { key: 'test' as const, label: 'Test', step: entry.steps.test },
                       { key: 'setup' as const, label: 'Setup', step: entry.steps.setup },
@@ -1071,6 +1125,6 @@ export function TestHeatmap({
           </Modal>
         )
       })()}
-    </div>
+    </>
   )
 }
