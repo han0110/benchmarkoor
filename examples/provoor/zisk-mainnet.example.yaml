@@ -55,7 +55,7 @@ runner:
           name: "zkVM stateless validation, mainnet blocks 25950000-25957199"
       source:
         eest_fixtures:
-          r2_bucket_url: https://github.com/han0110/benchmarkoor/releases/download/mainnet-stateless-inputs-25950000-25959999
+          r2_bucket_url: https://github.com/han0110/benchmarkoor/releases/download/mainnet-stateless-inputs-25950000-25959999-v21.0.1
           r2_bucket_starting_block: 25950000
           r2_bucket_blocks: 7200
 
@@ -66,11 +66,11 @@ runner:
       metadata:
         labels:
           zkvm: zisk
-          zkvm_version: v1.3.0-alpha
+          zkvm_version: v1.3.1-alpha
           stateless_validator: reth
       extra_args:
         - --zkvm=zisk
         - --stateless-validator=reth
-        - --elf=https://raw.githubusercontent.com/han0110/provoor/2073703e720a756a66555012acd5fc52c80d8130/elfs/stateless-validator-reth-zisk-v1.3.0-alpha.elf
-        - --vk=https://raw.githubusercontent.com/han0110/provoor/2073703e720a756a66555012acd5fc52c80d8130/elfs/stateless-validator-reth-zisk-v1.3.0-alpha.vk
+        - --elf=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-zisk-v1.3.1-alpha.elf
+        - --vk=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-zisk-v1.3.1-alpha.vk
         - --coordinator-endpoint=http://${COORDINATOR_IP}:7000
