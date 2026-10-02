@@ -55,7 +55,7 @@ runner:
           name: "zkVM stateless validation, mainnet blocks 25950000-25957199"
       source:
         eest_fixtures:
-          r2_bucket_url: https://github.com/han0110/benchmarkoor/releases/download/mainnet-stateless-inputs-25950000-25959999
+          r2_bucket_url: https://github.com/han0110/benchmarkoor/releases/download/mainnet-stateless-inputs-25950000-25959999-v21.0.1
           r2_bucket_starting_block: 25950000
           r2_bucket_blocks: 7200
 
@@ -71,6 +71,6 @@ runner:
       extra_args:
         - --zkvm=openvm
         - --stateless-validator=reth
-        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.17.0/stateless-validator-reth-openvm-v2.1.0-preview.elf
-        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.17.0/stateless-validator-reth-openvm-v2.1.0-preview.vk
+        - --elf=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-openvm-v2.1.0-preview.elf
+        - --vk=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-openvm-v2.1.0-preview.vk
         - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
