@@ -68,6 +68,7 @@ runner:
           zkvm: zisk
           zkvm_version: v1.3.1-alpha
           stateless_validator: reth
+          stateless_validator_version: v0.1.0-rc.3
       extra_args:
         - --zkvm=zisk
         - --stateless-validator=reth

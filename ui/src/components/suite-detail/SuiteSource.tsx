@@ -353,16 +353,18 @@ export function SuiteSource({ title, source }: SuiteSourceProps) {
               {eest.fixtures_url && (
                 <div>
                   <dt className="text-xs/5 font-medium text-gray-500 dark:text-gray-400">Fixtures URL</dt>
-                  <dd className="mt-1 break-all text-sm/6">
-                    <a
-                      href={eest.fixtures_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline dark:text-blue-400"
-                    >
-                      {eest.fixtures_url}
-                    </a>
-                  </dd>
+                  {eest.fixtures_url.split(',').map((fixturesUrl) => (
+                    <dd key={fixturesUrl} className="mt-1 break-all text-sm/6">
+                      <a
+                        href={fixturesUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {fixturesUrl}
+                      </a>
+                    </dd>
+                  ))}
                 </div>
               )}
               {eest.genesis_url && (

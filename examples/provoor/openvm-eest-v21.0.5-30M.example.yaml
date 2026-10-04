@@ -1,4 +1,4 @@
-# EEST v0.8.2 10M suite
+# EEST v21.0.5 30M suite
 global:
   log_level: info
 
@@ -50,58 +50,44 @@ runner:
     results_dir: ./results
     system_resource_collection_enabled: false
     tests:
-      filter: gas-value_10M
       metadata:
         labels:
-          name: "zkVM stateless validation, eest v0.8.2, 10M gas"
+          name: "zkVM stateless validation, eest v21.0.5, 30M gas"
       source:
         eest_fixtures:
           github_repo: ethereum/execution-specs
-          github_release: tests-zkevm-benchmark@v0.8.2
-          fixtures_url: https://github.com/ethereum/execution-specs/releases/download/tests-zkevm-benchmark@v0.8.2/fixtures_zkevm-benchmark.tar.gz
+          github_release: tests-zkevm-benchmark@v21.0.5
+          fixtures_url: https://github.com/ethereum/execution-specs/releases/download/tests-zkevm-benchmark@v21.0.5/fixtures_zkevm-benchmark_0030M.tar.gz
           fixtures_subdir: fixtures/blockchain_tests
 
   instances:
-    - id: reth-zisk
+    - id: reth-openvm
       client: provoor
       image: ghcr.io/han0110/provoor/provoor:latest
       metadata:
         labels:
-          zkvm: zisk
-          zkvm_version: v1.3.0-alpha
+          zkvm: openvm
+          zkvm_version: v2.1.0-preview
           stateless_validator: reth
+          stateless_validator_version: v0.1.0-rc.3
       extra_args:
-        - --zkvm=zisk
+        - --zkvm=openvm
         - --stateless-validator=reth
-        - --elf=https://raw.githubusercontent.com/han0110/provoor/2073703e720a756a66555012acd5fc52c80d8130/elfs/stateless-validator-reth-zisk-v1.3.0-alpha.elf
-        - --vk=https://raw.githubusercontent.com/han0110/provoor/2073703e720a756a66555012acd5fc52c80d8130/elfs/stateless-validator-reth-zisk-v1.3.0-alpha.vk
-        - --coordinator-endpoint=http://${COORDINATOR_IP}:7000
-    - id: ethrex-zisk
+        - --elf=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-openvm-v2.1.0-preview.elf
+        - --vk=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-openvm-v2.1.0-preview.vk
+        - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
+    - id: ethrex-openvm
       client: provoor
       image: ghcr.io/han0110/provoor/provoor:latest
       metadata:
         labels:
-          zkvm: zisk
-          zkvm_version: v1.3.0-alpha
+          zkvm: openvm
+          zkvm_version: v2.1.0-preview
           stateless_validator: ethrex
+          stateless_validator_version: v26.0.0-rc.1
       extra_args:
-        - --zkvm=zisk
+        - --zkvm=openvm
         - --stateless-validator=ethrex
-        - --elf=https://raw.githubusercontent.com/han0110/provoor/2073703e720a756a66555012acd5fc52c80d8130/elfs/stateless-validator-ethrex-zisk-v1.3.0-alpha.elf
-        - --vk=https://raw.githubusercontent.com/han0110/provoor/2073703e720a756a66555012acd5fc52c80d8130/elfs/stateless-validator-ethrex-zisk-v1.3.0-alpha.vk
-        - --coordinator-endpoint=http://${COORDINATOR_IP}:7000
-    - id: zesu-zisk
-      client: provoor
-      image: ghcr.io/han0110/provoor/provoor:latest
-      metadata:
-        labels:
-          zkvm: zisk
-          zkvm_version: v1.3.0-alpha
-          stateless_validator: zesu
-      extra_args:
-        - --zkvm=zisk
-        - --stateless-validator=zesu
-        - --elf=https://raw.githubusercontent.com/han0110/provoor/2073703e720a756a66555012acd5fc52c80d8130/elfs/stateless-validator-zesu-zisk-v1.3.0-alpha.elf
-        - --vk=https://raw.githubusercontent.com/han0110/provoor/2073703e720a756a66555012acd5fc52c80d8130/elfs/stateless-validator-zesu-zisk-v1.3.0-alpha.vk
-        - --coordinator-endpoint=http://${COORDINATOR_IP}:7000
-
+        - --elf=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-ethrex-openvm-v2.1.0-preview.elf
+        - --vk=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-ethrex-openvm-v2.1.0-preview.vk
+        - --coordinator-endpoint=http://${COORDINATOR_IP}:3000

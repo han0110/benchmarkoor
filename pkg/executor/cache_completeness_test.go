@@ -221,11 +221,12 @@ func TestEESTCacheReDownloadsUntilComplete(t *testing.T) {
 	cfg := &config.EESTFixturesSource{
 		GitHubRepo:    "owner/repo",
 		GitHubRelease: "v1",
-		FixturesURL:   srv.URL + "/fixtures.tar.gz",
+		FixturesURL:   []string{srv.URL + "/fixtures.tar.gz"},
 		GenesisURL:    srv.URL + "/genesis.tar.gz",
 	}
 
-	marker := filepath.Join(cacheDir, "eest", hashRepoURL(cfg.GitHubRepo), cfg.GitHubRelease, ".complete")
+	cacheKey := cfg.GitHubRelease + "-" + hashRepoURL(cfg.FixturesURL[0]+"\n"+cfg.GenesisURL)
+	marker := filepath.Join(cacheDir, "eest", hashRepoURL(cfg.GitHubRepo), cacheKey, ".complete")
 
 	newSource := func() *EESTSource {
 		return NewEESTSource(quietLog(), cfg, cacheDir, nil, "")
@@ -262,5 +263,61 @@ func TestEESTCacheReDownloadsUntilComplete(t *testing.T) {
 
 	if got := atomic.LoadInt64(&genesisServed); got != 1 {
 		t.Fatalf("complete cache was re-downloaded; genesis served %d times", got)
+	}
+}
+
+// Every fixtures_url tarball is extracted into one fixtures directory, and each
+// distinct URL list gets its own cache, in release mode and in URL mode alike.
+func TestEESTFixturesURLListCachesPerList(t *testing.T) {
+	subdir := config.DefaultEESTFixturesSubdir
+	tarballs := map[string][]byte{
+		"/a.tar.gz":       dirTarGz(t, subdir, subdir+"/a"),
+		"/b.tar.gz":       dirTarGz(t, subdir, subdir+"/b"),
+		"/genesis.tar.gz": dirTarGz(t),
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(tarballs[r.URL.Path])
+	}))
+	defer srv.Close()
+
+	cacheDir := t.TempDir()
+	a, b := srv.URL+"/a.tar.gz", srv.URL+"/b.tar.gz"
+
+	prepare := func(cfg *config.EESTFixturesSource) *EESTSource {
+		t.Helper()
+
+		source := NewEESTSource(quietLog(), cfg, cacheDir, nil, "")
+		if _, err := source.Prepare(context.Background()); err != nil {
+			t.Fatalf("Prepare failed: %v", err)
+		}
+
+		return source
+	}
+
+	for _, release := range []string{"v1", ""} {
+		newConfig := func(urls ...string) *config.EESTFixturesSource {
+			cfg := &config.EESTFixturesSource{FixturesURL: urls}
+			if release != "" {
+				cfg.GitHubRepo, cfg.GitHubRelease, cfg.GenesisURL = "owner/repo", release, srv.URL+"/genesis.tar.gz"
+			}
+
+			return cfg
+		}
+
+		both := prepare(newConfig(a, b))
+		onlyA := prepare(newConfig(a))
+
+		if both.fixturesDir == onlyA.fixturesDir {
+			t.Fatalf("release %q: different fixtures_url lists share cache %s", release, both.fixturesDir)
+		}
+
+		if !exists(filepath.Join(both.fixturesDir, subdir, "a")) || !exists(filepath.Join(both.fixturesDir, subdir, "b")) {
+			t.Fatalf("release %q: both tarballs must be extracted into %s", release, both.fixturesDir)
+		}
+
+		if exists(filepath.Join(onlyA.fixturesDir, subdir, "b")) {
+			t.Fatalf("release %q: a single-tarball cache holds the other tarball", release)
+		}
 	}
 }

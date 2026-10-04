@@ -150,8 +150,12 @@ func (s *EESTSource) Prepare(ctx context.Context) (*PreparedSource, error) {
 
 		cacheBase = filepath.Join(s.cacheDir, "eest-artifacts", repoHash, artifactKey)
 	} else {
-		// For releases, use the release tag.
+		// For releases, use the release tag, plus a hash of any URL overrides so
+		// that different tarballs of one release never share a cache.
 		cacheBase = filepath.Join(s.cacheDir, "eest", repoHash, s.cfg.GitHubRelease)
+		if len(s.cfg.FixturesURL) > 0 || s.cfg.GenesisURL != "" {
+			cacheBase += "-" + hashRepoURL(strings.Join(s.cfg.FixturesURL, "\n")+"\n"+s.cfg.GenesisURL)
+		}
 	}
 
 	s.fixturesDir = filepath.Join(cacheBase, "fixtures")
@@ -209,12 +213,12 @@ func (s *EESTSource) downloadAndExtract(ctx context.Context, cacheBase string) e
 	}
 
 	// Build download URLs.
-	fixturesURL := s.cfg.FixturesURL
-	if fixturesURL == "" {
-		fixturesURL = fmt.Sprintf(
+	fixturesURLs := s.cfg.FixturesURL
+	if len(fixturesURLs) == 0 {
+		fixturesURLs = []string{fmt.Sprintf(
 			"https://github.com/%s/releases/download/%s/fixtures_benchmark.tar.gz",
 			s.cfg.GitHubRepo, s.cfg.GitHubRelease,
-		)
+		)}
 	}
 
 	genesisURL := s.cfg.GenesisURL
@@ -226,10 +230,12 @@ func (s *EESTSource) downloadAndExtract(ctx context.Context, cacheBase string) e
 	}
 
 	// Download and extract fixtures.
-	s.log.WithField("url", fixturesURL).Info("Downloading fixtures tarball")
+	for _, fixturesURL := range fixturesURLs {
+		s.log.WithField("url", fixturesURL).Info("Downloading fixtures tarball")
 
-	if err := s.downloadAndExtractTarball(ctx, fixturesURL, s.fixturesDir); err != nil {
-		return fmt.Errorf("extracting fixtures: %w", err)
+		if err := s.downloadAndExtractTarball(ctx, fixturesURL, s.fixturesDir); err != nil {
+			return fmt.Errorf("extracting fixtures: %w", err)
+		}
 	}
 
 	// Download and extract genesis. A release without a genesis tarball, such
@@ -311,7 +317,7 @@ func (s *EESTSource) downloadArtifacts(ctx context.Context, cacheBase string) er
 // release/plain .tar.gz URL or a GitHub Actions artifact URL. No genesis is
 // fetched (stateful-engine fixtures boot from the snapshot datadir).
 func (s *EESTSource) prepareFromURL(ctx context.Context) (*PreparedSource, error) {
-	cacheBase := filepath.Join(s.cacheDir, "eest-url", hashRepoURL(s.cfg.FixturesURL))
+	cacheBase := filepath.Join(s.cacheDir, "eest-url", hashRepoURL(strings.Join(s.cfg.FixturesURL, "\n")))
 	s.fixturesDir = filepath.Join(cacheBase, "fixtures")
 	s.genesisDir = filepath.Join(cacheBase, "genesis")
 
@@ -337,16 +343,25 @@ func (s *EESTSource) prepareFromURL(ctx context.Context) (*PreparedSource, error
 	return s.discoverTests()
 }
 
-// downloadFromURL fetches fixtures from s.cfg.FixturesURL into s.fixturesDir. A
-// GitHub Actions artifact URL is downloaded via the API (needs a token) and its
-// inner .tar.gz extracted; any other URL is treated as a direct .tar.gz.
+// downloadFromURL fetches fixtures from each s.cfg.FixturesURL into s.fixturesDir.
 func (s *EESTSource) downloadFromURL(ctx context.Context) error {
 	if err := os.MkdirAll(s.fixturesDir, 0o755); err != nil {
 		return fmt.Errorf("creating fixtures directory: %w", err)
 	}
 
-	url := s.cfg.FixturesURL
+	for _, url := range s.cfg.FixturesURL {
+		if err := s.downloadOneFromURL(ctx, url); err != nil {
+			return err
+		}
+	}
 
+	return nil
+}
+
+// downloadOneFromURL fetches fixtures from url into s.fixturesDir. A GitHub
+// Actions artifact URL is downloaded via the API (needs a token) and its inner
+// .tar.gz extracted; any other URL is treated as a direct .tar.gz.
+func (s *EESTSource) downloadOneFromURL(ctx context.Context, url string) error {
 	if owner, repo, artifactID, ok := parseGitHubArtifactURL(url); ok {
 		s.log.WithFields(logrus.Fields{
 			"owner": owner, "repo": repo, "artifact_id": artifactID,
@@ -1155,7 +1170,7 @@ func (s *EESTSource) GetSourceInfo() (*SuiteSource, error) {
 		EEST: &EESTSourceInfo{
 			GitHubRepo:            s.cfg.GitHubRepo,
 			GitHubRelease:         s.cfg.GitHubRelease,
-			FixturesURL:           s.cfg.FixturesURL,
+			FixturesURL:           strings.Join(s.cfg.FixturesURL, ","),
 			GenesisURL:            s.cfg.GenesisURL,
 			FixturesSubdir:        fixturesSubdir,
 			FixturesArtifactName:  s.cfg.FixturesArtifactName,
@@ -1395,7 +1410,7 @@ func (p *statelessFixtureProvider) Content() []byte {
 type EESTSourceInfo struct {
 	GitHubRepo     string `json:"github_repo,omitempty"`
 	GitHubRelease  string `json:"github_release,omitempty"`
-	FixturesURL    string `json:"fixtures_url,omitempty"`
+	FixturesURL    string `json:"fixtures_url,omitempty"` // Comma-separated, as the config scalar form.
 	GenesisURL     string `json:"genesis_url,omitempty"`
 	FixturesSubdir string `json:"fixtures_subdir,omitempty"`
 	// Artifact fields (alternative to releases).

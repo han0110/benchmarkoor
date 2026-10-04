@@ -679,6 +679,35 @@ runner:
 	assert.Equal(t, DefaultR2BucketFixturesSubdir, cfg.Runner.Benchmark.Tests.Source.EESTFixtures.FixturesSubdir)
 }
 
+func TestLoad_EESTFixturesURLScalarOrList(t *testing.T) {
+	base := `
+runner:
+  benchmark:
+    tests:
+      source:
+        eest_fixtures:
+          fixtures_url: %s
+  instances:
+    - id: test-instance
+      client: provoor
+`
+
+	for _, tc := range []struct {
+		yaml string
+		want []string
+	}{
+		{"https://x/a.tar.gz", []string{"https://x/a.tar.gz"}},
+		{"[https://x/a.tar.gz, https://x/b.tar.gz]", []string{"https://x/a.tar.gz", "https://x/b.tar.gz"}},
+	} {
+		configPath := filepath.Join(t.TempDir(), "config.yaml")
+		require.NoError(t, os.WriteFile(configPath, []byte(fmt.Sprintf(base, tc.yaml)), 0o644))
+
+		cfg, err := Load(configPath)
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, cfg.Runner.Benchmark.Tests.Source.EESTFixtures.FixturesURL)
+	}
+}
+
 func TestLoad_EnvVarOverridesDefaults(t *testing.T) {
 	// Create a minimal config without log_level set.
 	configContent := `
@@ -5108,14 +5137,14 @@ func boolCfg(v bool) *bool    { return &v }
 
 func TestEESTFixturesSource_UseFixturesURL(t *testing.T) {
 	// Standalone URL mode.
-	assert.True(t, (&EESTFixturesSource{FixturesURL: "https://x/f.tar.gz"}).UseFixturesURL())
+	assert.True(t, (&EESTFixturesSource{FixturesURL: []string{"https://x/f.tar.gz"}}).UseFixturesURL())
 	// With github_release set, fixtures_url is a release-URL override, not standalone.
-	assert.False(t, (&EESTFixturesSource{FixturesURL: "https://x/f.tar.gz", GitHubRelease: "v1"}).UseFixturesURL())
+	assert.False(t, (&EESTFixturesSource{FixturesURL: []string{"https://x/f.tar.gz"}, GitHubRelease: "v1"}).UseFixturesURL())
 	assert.False(t, (&EESTFixturesSource{}).UseFixturesURL())
 
 	// A standalone fixtures_url is a valid mode and needs no github_repo.
 	require.NoError(t, (&EESTFixturesSource{
-		FixturesURL: "https://x/f.tar.gz", FixturesSubdir: "sub",
+		FixturesURL: []string{"https://x/f.tar.gz"}, FixturesSubdir: "sub",
 	}).validate())
 }
 

@@ -886,11 +886,14 @@ type SourceConfig struct {
 // EESTFixturesSource defines an EEST fixtures source from GitHub releases, artifacts,
 // or local directories/tarballs.
 type EESTFixturesSource struct {
-	GitHubRepo     string `yaml:"github_repo,omitempty" mapstructure:"github_repo"`
-	GitHubRelease  string `yaml:"github_release,omitempty" mapstructure:"github_release"`
-	FixturesURL    string `yaml:"fixtures_url,omitempty" mapstructure:"fixtures_url"`
-	GenesisURL     string `yaml:"genesis_url,omitempty" mapstructure:"genesis_url"`
-	FixturesSubdir string `yaml:"fixtures_subdir,omitempty" mapstructure:"fixtures_subdir"`
+	GitHubRepo    string `yaml:"github_repo,omitempty" mapstructure:"github_repo"`
+	GitHubRelease string `yaml:"github_release,omitempty" mapstructure:"github_release"`
+	// FixturesURL lists one or more fixtures tarballs, all extracted into the
+	// same fixtures directory. A plain scalar also works through the
+	// StringToSliceHookFunc(",") decode hook in Load.
+	FixturesURL    []string `yaml:"fixtures_url,omitempty" mapstructure:"fixtures_url"`
+	GenesisURL     string   `yaml:"genesis_url,omitempty" mapstructure:"genesis_url"`
+	FixturesSubdir string   `yaml:"fixtures_subdir,omitempty" mapstructure:"fixtures_subdir"`
 	// GitHub Actions artifact support (alternative to releases).
 	FixturesArtifactName  string `yaml:"fixtures_artifact_name,omitempty" mapstructure:"fixtures_artifact_name"`
 	GenesisArtifactName   string `yaml:"genesis_artifact_name,omitempty" mapstructure:"genesis_artifact_name"`
@@ -970,7 +973,7 @@ func (e *EESTFixturesSource) UseLocalTarball() bool {
 // github_release is also set, fixtures_url is instead a release-URL override, so
 // this is false and release mode handles it.
 func (e *EESTFixturesSource) UseFixturesURL() bool {
-	return e.FixturesURL != "" && e.GitHubRelease == ""
+	return len(e.FixturesURL) > 0 && e.GitHubRelease == ""
 }
 
 // UseR2Bucket returns true if the source is configured to use an R2 bucket.
