@@ -436,6 +436,10 @@ func (m *manager) RunInitContainer(ctx context.Context, spec *ContainerSpec, std
 
 // StreamLogs streams container logs to the provided writers.
 func (m *manager) StreamLogs(ctx context.Context, containerID string, stdout, stderr io.Writer) error {
+	if err := m.waitForStarted(ctx, containerID); err != nil {
+		return err
+	}
+
 	opts := container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
