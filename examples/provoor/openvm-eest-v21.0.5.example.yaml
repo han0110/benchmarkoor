@@ -52,7 +52,7 @@ runner:
     tests:
       metadata:
         labels:
-          name: "zkVM stateless validation, eest v21.0.5, 60M 100M 150M gas"
+          name: "zkVM stateless validation, eest v21.0.5, 60M 100M 150M 200M gas"
       source:
         eest_fixtures:
           github_repo: ethereum/execution-specs
@@ -61,6 +61,7 @@ runner:
             - https://github.com/ethereum/execution-specs/releases/download/tests-zkevm-benchmark@v21.0.5/fixtures_zkevm-benchmark_0060M.tar.gz
             - https://github.com/ethereum/execution-specs/releases/download/tests-zkevm-benchmark@v21.0.5/fixtures_zkevm-benchmark_0100M.tar.gz
             - https://github.com/ethereum/execution-specs/releases/download/tests-zkevm-benchmark@v21.0.5/fixtures_zkevm-benchmark_0150M.tar.gz
+            - https://github.com/ethereum/execution-specs/releases/download/tests-zkevm-benchmark@v21.0.5/fixtures_zkevm-benchmark_0200M.tar.gz
           fixtures_subdir: fixtures/blockchain_tests
 
   instances:
