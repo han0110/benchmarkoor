@@ -1,0 +1,37 @@
+{
+  "witness-generator-spec-cli::block_11856702_8a7bd6f47b12ecdc012b26ba13b097b93531abf5f885eab57a18037bebf1d126": {
+    "network": "Amsterdam",
+    "config": {
+      "chainid": "0xaa36a7"
+    },
+    "engineNewPayloads": [
+      {
+        "params": [
+          {
+            "blockNumber": "0xb4eb3e",
+            "gasUsed": "0xbeffc3"
+          }
+        ],
+        "statelessInputBytes": "0x15011000000013450100a736aa00000000002c000000af43010020e9c5df5ac7",
+        "statelessOutputBytes": "0x2d4fd86355008f70a88dc29176ed83dd6a0080927a1415d31728f25dfea8b00501a736aa00000000000115"
+      }
+    ],
+    "_info": {
+      "metadata": {
+        "witness_generator": {
+          "schemaVersion": 3,
+          "network": "sepolia",
+          "blockHash": "0x8a7bd6f47b12ecdc012b26ba13b097b93531abf5f885eab57a18037bebf1d126",
+          "slotNumber": 11297199,
+          "collectionMode": "head",
+          "collectedAt": "2026-10-06T15:19:52.087127099Z",
+          "generatorPackage": "witness-generator-spec-cli",
+          "generatorVersion": "0.1.0",
+          "generatorGitCommit": "unknown",
+          "statelessInputSchemaId": "0x1501",
+          "statelessInputByteLength": 2901672
+        }
+      }
+    }
+  }
+}

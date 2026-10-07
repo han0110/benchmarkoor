@@ -589,15 +589,16 @@ tests:
 
 ###### From an R2 Bucket
 
-A stateless inputs catalog publishes live devnet blocks as EEST fixtures in an R2 bucket. The bucket serves `manifest.json`, which names the batch index, and each batch is a `tar.zst` archive of consecutive blocks. Only the batches that cover the configured block range are downloaded, and the run fails when a height in the range has no fixture. A reorged height carries more than one block, and only the block in the latest slot is benchmarked. Archives stay in the cache after extraction, keyed by the bucket URL, and the blocks inside the range are extracted next to them into a directory keyed by the range.
+A stateless inputs catalog publishes live network blocks as EEST fixtures in an R2 bucket. The bucket serves `manifest.json`, which names the batch index, and each batch is a `tar.zst` archive of consecutive blocks. Only the batches that cover the configured block range are downloaded, and the run fails when a height in the range has no fixture. A reorged height carries more than one block, and only the block in the latest slot is benchmarked. Archives stay in the cache after extraction, keyed by the bucket URL, and the blocks inside the range are extracted next to them into a directory keyed by the range.
 
 ```yaml
 tests:
   source:
     eest_fixtures:
-      r2_bucket_url: https://pub-760ad8b3dd9547539f829c1ea30f18b5.r2.dev/devnets/glamsterdam-devnet-8
-      r2_bucket_starting_block: 100000
-      r2_bucket_blocks: 1000
+      r2_bucket_url: https://pub-afa6b160acfb4919bda1d0e2a00b5b77.r2.dev/testnets/sepolia
+      r2_bucket_starting_block: 11856500
+      r2_bucket_blocks: 300
+      fixtures_subdir: blockchain_tests_engine
 ```
 
 | Option | Type | Required | Default | Description |
@@ -607,7 +608,7 @@ tests:
 | `r2_bucket_blocks` | integer | Yes | - | Number of consecutive heights to benchmark, at least 1 |
 | `fixtures_subdir` | string | No | `blockchain_tests` | Subdirectory within a batch archive to search |
 
-Each block converts to one `engine_proveStatelessValidator` call. The catalog fixtures carry no opcode counts, so the suite reports none unless `tests.opcode_source` supplies them. `tests.filter` still applies to the fixture names, for example `filter: "block_100050_"`.
+Each block converts to one `engine_proveStatelessValidator` call. A catalog fixture carries its stateless input either in `blocks` under `blockchain_tests` or in `engineNewPayloads` under `blockchain_tests_engine`, and `fixtures_subdir` selects the directory. The catalog fixtures carry no opcode counts, so the suite reports none unless `tests.opcode_source` supplies them. `tests.filter` still applies to the fixture names, for example `filter: "block_11856550_"`.
 
 **Key features:**
 - Automatically downloads and caches fixtures from GitHub releases or artifacts
