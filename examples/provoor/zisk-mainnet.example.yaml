@@ -58,6 +58,7 @@ runner:
           r2_bucket_url: https://github.com/han0110/benchmarkoor/releases/download/mainnet-stateless-inputs-25950000-25959999-v21.0.1
           r2_bucket_starting_block: 25950000
           r2_bucket_blocks: 7200
+          fixtures_subdir: blockchain_tests_engine
 
   instances:
     - id: reth-zisk
@@ -68,7 +69,7 @@ runner:
           zkvm: zisk
           zkvm_version: v1.3.1-alpha
           stateless_validator: reth
-          stateless_validator_version: v0.1.0-rc.3
+          stateless_validator_version: v0.1.0-rc.4
       extra_args:
         - --zkvm=zisk
         - --stateless-validator=reth

@@ -58,6 +58,7 @@ runner:
           r2_bucket_url: https://github.com/han0110/benchmarkoor/releases/download/mainnet-stateless-inputs-25950000-25959999-v21.0.1
           r2_bucket_starting_block: 25950000
           r2_bucket_blocks: 7200
+          fixtures_subdir: blockchain_tests_engine
 
   instances:
     - id: reth-openvm
@@ -68,10 +69,10 @@ runner:
           zkvm: openvm
           zkvm_version: v2.1.0-preview
           stateless_validator: reth
-          stateless_validator_version: v0.1.0-rc.3
+          stateless_validator_version: v0.1.0-rc.4
       extra_args:
         - --zkvm=openvm
         - --stateless-validator=reth
-        - --elf=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-openvm-v2.1.0-preview.elf
-        - --vk=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-openvm-v2.1.0-preview.vk
+        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.18.0/stateless-validator-reth-openvm-v2.1.0-preview.elf
+        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.18.0/stateless-validator-reth-openvm-v2.1.0-preview.vk
         - --coordinator-endpoint=http://${COORDINATOR_IP}:3000

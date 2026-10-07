@@ -1,4 +1,4 @@
-# glamsterdam-devnet-8 suite
+# sepolia suite
 global:
   log_level: info
 
@@ -52,12 +52,13 @@ runner:
     tests:
       metadata:
         labels:
-          name: "zkVM stateless validation, glamsterdam-devnet-8 blocks 100000-100999"
+          name: "zkVM stateless validation, sepolia blocks 11856500-11857499"
       source:
         eest_fixtures:
-          r2_bucket_url: https://pub-760ad8b3dd9547539f829c1ea30f18b5.r2.dev/devnets/glamsterdam-devnet-8
-          r2_bucket_starting_block: 100000
+          r2_bucket_url: https://pub-afa6b160acfb4919bda1d0e2a00b5b77.r2.dev/testnets/sepolia
+          r2_bucket_starting_block: 11856500
           r2_bucket_blocks: 1000
+          fixtures_subdir: blockchain_tests_engine
 
   instances:
     - id: reth-openvm
@@ -68,12 +69,12 @@ runner:
           zkvm: openvm
           zkvm_version: v2.1.0-preview
           stateless_validator: reth
-          stateless_validator_version: v0.1.0-rc.3
+          stateless_validator_version: v0.1.0-rc.4
       extra_args:
         - --zkvm=openvm
         - --stateless-validator=reth
-        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.17.0/stateless-validator-reth-openvm-v2.1.0-preview.elf
-        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.17.0/stateless-validator-reth-openvm-v2.1.0-preview.vk
+        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.18.0/stateless-validator-reth-openvm-v2.1.0-preview.elf
+        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.18.0/stateless-validator-reth-openvm-v2.1.0-preview.vk
         - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
     - id: ethrex-openvm
       client: provoor
@@ -83,10 +84,10 @@ runner:
           zkvm: openvm
           zkvm_version: v2.1.0-preview
           stateless_validator: ethrex
-          stateless_validator_version: v26.0.0
+          stateless_validator_version: v29.0.0
       extra_args:
         - --zkvm=openvm
         - --stateless-validator=ethrex
-        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.17.0/stateless-validator-ethrex-openvm-v2.1.0-preview.elf
-        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.17.0/stateless-validator-ethrex-openvm-v2.1.0-preview.vk
+        - --elf=https://github.com/eth-act/ere-guests/releases/download/v0.18.0/stateless-validator-ethrex-openvm-v2.1.0-preview.elf
+        - --vk=https://github.com/eth-act/ere-guests/releases/download/v0.18.0/stateless-validator-ethrex-openvm-v2.1.0-preview.vk
         - --coordinator-endpoint=http://${COORDINATOR_IP}:3000
