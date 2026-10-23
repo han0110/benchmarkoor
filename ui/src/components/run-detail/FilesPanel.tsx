@@ -25,7 +25,13 @@ interface FilesPanelProps {
   onDownloadFormatChange: (format: DownloadListFormat) => void
 }
 
-interface FileEntry {
+interface GeneratedFilesPanelProps extends Pick<FilesPanelProps, 'showDownloadList' | 'downloadFormat' | 'onShowDownloadListChange' | 'onDownloadFormatChange'> {
+  id: string
+  trees: { key: string; label: string; nodes: TreeNode[] }[]
+  categories: CategoryInfo[]
+}
+
+export interface FileEntry {
   testName: string
   filename: string
   path: string
@@ -33,7 +39,7 @@ interface FileEntry {
   outputPath: string
 }
 
-interface TreeNode {
+export interface TreeNode {
   id: string
   name: string
   type: 'file' | 'directory'
@@ -393,6 +399,9 @@ function FileTreeRow({
   const FileIcon = isJson ? FileText : File
   // The file viewer reads text, so a compressed file downloads on click.
   const isCompressed = entry.filename.endsWith('.gz')
+  // The viewer finds a file outside the run directory through the base parameter.
+  const file = entry.outputPath.slice(runId.length + 1)
+  const base = entry.path.slice(0, -(file.length + 1))
   const nameClassName = 'min-w-0 truncate font-mono text-gray-900 hover:text-blue-600 dark:text-gray-100 dark:hover:text-blue-400'
   const nameLabel = (
     <>
@@ -424,7 +433,7 @@ function FileTreeRow({
         <Link
           to="/runs/$runId/fileviewer"
           params={{ runId }}
-          search={{ file: entry.path.replace(`runs/${runId}/`, '') }}
+          search={{ file, ...(base !== `runs/${runId}` && { base }) }}
           target="_blank"
           className={nameClassName}
         >
@@ -523,7 +532,7 @@ function FileTree({
 
 // --- Category entry map for download modal ---
 
-interface CategoryInfo {
+export interface CategoryInfo {
   key: string
   label: string
   entries: FileEntry[]
@@ -532,11 +541,6 @@ interface CategoryInfo {
 // --- FilesPanel ---
 
 export function FilesPanel({ runId, tests, postTestRPCCalls, pipelineTests, hasRemoteMetrics, showDownloadList, downloadFormat, onShowDownloadListChange, onDownloadFormatChange }: FilesPanelProps) {
-  const [expanded, setExpanded] = useState(showDownloadList)
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set())
-  const [fileFilter, setFileFilter] = useState<'all' | 'dumps'>('all')
-  const [excludedCategories, setExcludedCategories] = useState<Set<string>>(() => new Set())
-
   const testNames = useMemo(() => Object.keys(tests), [tests])
 
   const generalEntries = useMemo(() => buildGeneralEntries(runId), [runId])
@@ -563,7 +567,54 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, pipelineTests, hasR
     [tests, runId, postTestRPCCalls],
   )
 
-  const tree = fileFilter === 'dumps' ? dumpsTree : allTree
+  // The general files differ between runs, so the download list and the file
+  // count leave out those a HEAD request finds missing.
+  const existingGeneralEntries = useQueries({
+    queries: generalEntries.map((entry) => ({
+      queryKey: ['file-panel', entry.path],
+      queryFn: () => fetchHead(entry.path),
+      staleTime: Infinity,
+    })),
+    combine: (results) => generalEntries.filter((_, i) => results[i].data?.exists !== false),
+  })
+
+  // Categories for download modal
+  const categories: CategoryInfo[] = useMemo(() => {
+    const result: CategoryInfo[] = [
+      { key: 'general', label: 'General', entries: existingGeneralEntries },
+      { key: 'test-stats', label: 'Stats', entries: testStatsEntries },
+      { key: 'test-responses', label: 'Responses', entries: testResponsesEntries },
+      { key: 'test-artifacts', label: 'Remote Metrics & Pipeline', entries: testArtifactEntries },
+    ]
+    if (hasPostTestDumps) {
+      result.push({ key: 'post-test-rpc-dumps', label: 'Post-Test RPC Dumps', entries: postTestDumpEntries })
+    }
+    return result
+  }, [existingGeneralEntries, testStatsEntries, testResponsesEntries, testArtifactEntries, postTestDumpEntries, hasPostTestDumps])
+
+  return (
+    <GeneratedFilesPanel
+      id={runId}
+      trees={[
+        { key: 'all', label: 'All', nodes: allTree },
+        ...(hasPostTestDumps ? [{ key: 'dumps', label: 'Post-Test RPC Dumps', nodes: dumpsTree }] : []),
+      ]}
+      categories={categories}
+      showDownloadList={showDownloadList}
+      downloadFormat={downloadFormat}
+      onShowDownloadListChange={onShowDownloadListChange}
+      onDownloadFormatChange={onDownloadFormatChange}
+    />
+  )
+}
+
+export function GeneratedFilesPanel({ id, trees, categories, showDownloadList, downloadFormat, onShowDownloadListChange, onDownloadFormatChange }: GeneratedFilesPanelProps) {
+  const [expanded, setExpanded] = useState(showDownloadList)
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set())
+  const [fileFilter, setFileFilter] = useState(trees[0].key)
+  const [excludedCategories, setExcludedCategories] = useState<Set<string>>(() => new Set())
+
+  const tree = (trees.find(({ key }) => key === fileFilter) ?? trees[0]).nodes
 
   // Flatten tree into a flat row list for virtualization
   const flatRows = useMemo(
@@ -609,31 +660,6 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, pipelineTests, hasR
     })
   }, [])
 
-  // The general files differ between runs, so the download list and the file
-  // count leave out those a HEAD request finds missing.
-  const existingGeneralEntries = useQueries({
-    queries: generalEntries.map((entry) => ({
-      queryKey: ['file-panel', entry.path],
-      queryFn: () => fetchHead(entry.path),
-      staleTime: Infinity,
-    })),
-    combine: (results) => generalEntries.filter((_, i) => results[i].data?.exists !== false),
-  })
-
-  // Categories for download modal
-  const categories: CategoryInfo[] = useMemo(() => {
-    const result: CategoryInfo[] = [
-      { key: 'general', label: 'General', entries: existingGeneralEntries },
-      { key: 'test-stats', label: 'Stats', entries: testStatsEntries },
-      { key: 'test-responses', label: 'Responses', entries: testResponsesEntries },
-      { key: 'test-artifacts', label: 'Remote Metrics & Pipeline', entries: testArtifactEntries },
-    ]
-    if (hasPostTestDumps) {
-      result.push({ key: 'post-test-rpc-dumps', label: 'Post-Test RPC Dumps', entries: postTestDumpEntries })
-    }
-    return result
-  }, [existingGeneralEntries, testStatsEntries, testResponsesEntries, testArtifactEntries, postTestDumpEntries, hasPostTestDumps])
-
   const toggleCategory = useCallback((key: string) => {
     setExcludedCategories((prev) => {
       const next = new Set(prev)
@@ -678,8 +704,10 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, pipelineTests, hasR
     // Build curl script with progress.
     const authFlag = needsAuth ? ' -H "Authorization: Bearer $BENCHMARKOOR_API_KEY"' : ''
     const total = downloadEntries.length
+    // A single quote ends a single-quoted shell word, so it goes in as '\''.
+    const quote = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`
     const urls = downloadEntries.map(
-      (e) => `  '${toAbsoluteUrl(getNavigableDataUrl(e.path, runtimeConfig))}' '${e.outputPath}'`,
+      (e) => `  ${quote(toAbsoluteUrl(getNavigableDataUrl(e.path, runtimeConfig)))} ${quote(e.outputPath)}`,
     )
 
     const lines: string[] = []
@@ -740,12 +768,12 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, pipelineTests, hasR
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = isCurl ? `${runId}.sh` : `${runId}.txt`
+    a.download = isCurl ? `${id}.sh` : `${id}.txt`
     a.click()
     URL.revokeObjectURL(url)
-  }, [downloadListText, downloadFormat, runId])
+  }, [downloadListText, downloadFormat, id])
 
-  const totalEntries = existingGeneralEntries.length + testStatsEntries.length + testResponsesEntries.length + testArtifactEntries.length + postTestDumpEntries.length
+  const totalEntries = categories.reduce((sum, category) => sum + category.entries.length, 0)
   const summary = `${totalEntries} file${totalEntries !== 1 ? 's' : ''}`
 
   return (
@@ -772,9 +800,9 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, pipelineTests, hasR
       </div>
       {expanded && (
         <div className="p-4">
-          {hasPostTestDumps && (
+          {trees.length > 1 && (
             <div className="mb-3 flex items-center gap-1 rounded-xs bg-gray-100 p-0.5 dark:bg-gray-700" style={{ width: 'fit-content' }}>
-              {([{ key: 'all', label: 'All' }, { key: 'dumps', label: 'Post-Test RPC Dumps' }] as const).map(({ key, label }) => (
+              {trees.map(({ key, label }) => (
                 <button
                   key={key}
                   onClick={() => setFileFilter(key)}
@@ -792,7 +820,7 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, pipelineTests, hasR
           )}
           <FileTree
             flatRows={flatRows}
-            runId={runId}
+            runId={id}
             expandedDirs={expandedDirs}
             onToggleDir={toggleDir}
             headResultMap={headResultMap}
@@ -865,11 +893,11 @@ export function FilesPanel({ runId, tests, postTestRPCCalls, pipelineTests, hasR
               <p className="text-xs/5 text-gray-500 dark:text-gray-400">
                 Download{' '}
                 <button onClick={handleDownloadFile} className="text-blue-600 underline hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
-                  {runId}.sh
+                  {id}.sh
                 </button>
                 {requiresAuth
-                  ? <>. Run with: <code className="rounded-xs bg-gray-100 px-1 py-0.5 font-mono dark:bg-gray-900">chmod +x {runId}.sh && BENCHMARKOOR_API_KEY="bmk_..." ./{runId}.sh</code>{' '}<CopyButton text={`chmod +x ${runId}.sh && BENCHMARKOOR_API_KEY="bmk_..." ./${runId}.sh`} /></>
-                  : <>. Run with: <code className="rounded-xs bg-gray-100 px-1 py-0.5 font-mono dark:bg-gray-900">chmod +x {runId}.sh && ./{runId}.sh</code>{' '}<CopyButton text={`chmod +x ${runId}.sh && ./${runId}.sh`} /></>}
+                  ? <>. Run with: <code className="rounded-xs bg-gray-100 px-1 py-0.5 font-mono dark:bg-gray-900">chmod +x {id}.sh && BENCHMARKOOR_API_KEY="bmk_..." ./{id}.sh</code>{' '}<CopyButton text={`chmod +x ${id}.sh && BENCHMARKOOR_API_KEY="bmk_..." ./${id}.sh`} /></>
+                  : <>. Run with: <code className="rounded-xs bg-gray-100 px-1 py-0.5 font-mono dark:bg-gray-900">chmod +x {id}.sh && ./{id}.sh</code>{' '}<CopyButton text={`chmod +x ${id}.sh && ./${id}.sh`} /></>}
               </p>
             </div>
           )}

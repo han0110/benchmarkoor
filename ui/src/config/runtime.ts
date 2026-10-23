@@ -106,7 +106,7 @@ export function getDataUrl(path: string, config: RuntimeConfig): string {
   if ((isS3Mode(config) || isLocalMode(config)) && config.api?.baseUrl) {
     const runMatch = path.match(/^runs\/([^/]+)/)
     const suiteMatch = path.match(/^suites\/([^/]+)/)
-    const key = runMatch?.[1] ?? suiteMatch?.[1] ?? path.match(/^estimates\/([^/]+)/)?.[1]
+    const key = runMatch?.[1] ?? suiteMatch?.[1] ?? path.match(/^(?:estimates|profiles)\/([^/]+)/)?.[1]
     const dp = key ? getDiscoveryPath(key, config) : getDiscoveryPath('', config)
     return `${config.api.baseUrl}/api/v1/files/${dp}/${path}`
   }

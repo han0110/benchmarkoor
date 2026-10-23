@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gzipSync } from 'node:zlib'
-import { fetchGzipJson } from './client'
+import { fetchGzipBytes, fetchGzipJson } from './client'
 
 const document = { schemaVersion: 1, exporters: {} }
 
@@ -37,5 +37,14 @@ describe('fetchGzipJson', () => {
 
     serve('<!doctype html>\n<html lang="en"></html>')
     expect(await fetchGzipJson('runs/r/t/test.remote-metrics.json.gz')).toEqual({ data: null, status: 404 })
+  })
+})
+
+describe('fetchGzipBytes', () => {
+  it('inflates a gzip body to bytes that are not text', async () => {
+    const bytes = new Uint8Array([0x0a, 0xff, 0x00, 0x80])
+    serve(new Uint8Array(gzipSync(bytes)))
+
+    expect(await fetchGzipBytes('profiles/r/t/profile.pb.gz')).toEqual({ data: bytes, status: 200 })
   })
 })

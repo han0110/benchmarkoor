@@ -9,7 +9,7 @@ import { useIndex } from './useIndex'
 const routesByDiscoveryPath = (config: RuntimeConfig) => (isS3Mode(config) || isLocalMode(config)) && !!config.api?.baseUrl
 
 /** Reports whether a status means a missing file. S3 answers a read of a missing key with 403 when the signer cannot list the bucket. */
-const isMissingFile = (config: RuntimeConfig, status: number) => status === 404 || (status === 403 && isS3Mode(config))
+export const isMissingFile = (config: RuntimeConfig, status: number) => status === 404 || (status === 403 && isS3Mode(config))
 
 /** An estimate, null where the results hold none under the id. */
 async function fetchEstimate(config: RuntimeConfig, estimateId: string): Promise<RunEstimate | null> {

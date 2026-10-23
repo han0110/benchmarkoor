@@ -400,11 +400,12 @@ export function FileViewerPage() {
         search: {
           file: filename,
           lines: serializeLineSelection(newSelected),
+          base: search.base,
         },
         replace: true,
       })
     },
-    [navigate, runId, filename]
+    [navigate, runId, filename, search.base]
   )
 
   const handleLineClick = useCallback(

@@ -33,7 +33,7 @@ interface TestNameProps {
   className?: string
 }
 
-function CopyButton({ value, className }: { value: string; className?: string }) {
+export function CopyButton({ value, className }: { value: string; className?: string }) {
   const [copied, setCopied] = useState(false)
   const onCopy = async (e: React.MouseEvent) => {
     e.stopPropagation()

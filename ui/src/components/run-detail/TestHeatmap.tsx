@@ -12,6 +12,7 @@ import { MGasBreakdown } from './MGasBreakdown'
 import { ExecutionsList } from './ExecutionsList'
 import { BlockLogDetails } from './BlockLogDetails'
 import { TestPipeline } from './TestPipeline'
+import { TestProfile } from './TestProfile'
 import { TestRemoteMetrics } from './TestRemoteMetrics'
 import type { TestStatusFilter } from './TestsTable'
 import { type StepTypeOption, ALL_STEP_TYPES } from '@/pages/RunDetailPage'
@@ -19,6 +20,7 @@ import { formatDuration, formatBytes } from '@/utils/format'
 import { EESTInfoContent, type OpcodeSortMode } from '@/components/suite-detail/TestFilesList'
 import { OpcodeDiffPanel, type OpcodeDiffRow } from './OpcodeDiffPanel'
 import { useBlockLogs } from '@/api/hooks/useBlockLogs'
+import { useRunProfile } from '@/api/hooks/useProfile'
 import { useTestPipelineView } from '@/api/hooks/useTestPipeline'
 import { useTestRemoteMetrics } from '@/api/hooks/useTestRemoteMetrics'
 import { DEFAULT_THRESHOLD, THRESHOLD_COLORS, getColorByThreshold } from '@/utils/perfThreshold'
@@ -96,7 +98,7 @@ export type SortMode = 'order' | 'mgas' | 'gas'
 export type GroupMode = 'none' | 'gas'
 
 /** The tabs of the test modal, in the order they are shown. A tab of an artifact the test lacks is left out. */
-export const TEST_MODAL_TABS = ['test', 'setup', 'cleanup', 'pipeline', 'remote'] as const
+export const TEST_MODAL_TABS = ['test', 'setup', 'cleanup', 'pipeline', 'remote', 'profile'] as const
 export type TestModalTab = (typeof TEST_MODAL_TABS)[number]
 
 const GAS_GROUP_STEP = 30_000_000 // 30M gas per group
@@ -950,6 +952,8 @@ export function RunTestDetailModal({
   // The tab of an artifact the test lacks never opens on an empty body.
   const testPipeline = useTestPipelineView(runId, selectedTest ?? '')
   const { data: testRemoteMetrics } = useTestRemoteMetrics(runId, selectedTest ?? '')
+  const { data: runProfile } = useRunProfile(selectedTest ? runId : '')
+  const testProfile = runProfile?.tests[selectedTest ?? '']
 
   const executionOrder = useMemo(() => {
     if (!suiteTests) return new Map<string, number>()
@@ -1049,6 +1053,7 @@ export function RunTestDetailModal({
                   ...steps,
                   ...(testPipeline ? [{ key: 'pipeline' as const, label: 'Proving Pipeline' }] : []),
                   ...(testRemoteMetrics ? [{ key: 'remote' as const, label: 'Remote Metrics' }] : []),
+                  ...(testProfile ? [{ key: 'profile' as const, label: 'Profile' }] : []),
                 ]
                 if (tabs.length === 0) return null
 
@@ -1096,6 +1101,9 @@ export function RunTestDetailModal({
                     {/* Active Tab Content */}
                     {activeTab.key === 'pipeline' && testPipeline && <TestPipeline key={selectedTest} pipeline={testPipeline} />}
                     {activeTab.key === 'remote' && <TestRemoteMetrics key={selectedTest} runId={runId} testName={selectedTest} />}
+                    {activeTab.key === 'profile' && testProfile && (
+                      <TestProfile key={selectedTest} runId={runId} testName={selectedTest} peakHeapBytes={testProfile.peak_heap_bytes} peakStackBytes={testProfile.peak_stack_bytes} />
+                    )}
                     {activeStep && suiteHash && (
                       <div>
                         {activeStep.step?.aggregated && (

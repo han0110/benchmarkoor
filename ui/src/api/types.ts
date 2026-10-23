@@ -835,3 +835,16 @@ export interface EstimateIndexEntry {
   /** Cost per kind, summed over the passed tests. */
   cost: Record<string, number>
 }
+
+// result.profile.json, the cost and the peak memory a zkVM profiles for each
+// test of a run. The pprof of each test is profiles/<run id>/<test>/profile.pb.gz.
+export interface TestProfile extends TestEstimate {
+  peak_heap_bytes: number
+  /** Highest minus lowest stack pointer the guest runs with. */
+  peak_stack_bytes: number
+}
+
+export interface RunProfile extends Omit<RunEstimate, 'tests'> {
+  /** Keyed by test name. */
+  tests: Record<string, TestProfile>
+}

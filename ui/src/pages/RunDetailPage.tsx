@@ -156,7 +156,7 @@ export function RunDetailPage() {
     blFs?: boolean // Block Logs fullscreen
     dlModal?: boolean // Download list modal
     dlFmt?: string // Download list format
-    testStep?: string // Active tab in test modal (test/setup/cleanup/pipeline/remote)
+    testStep?: string // Active tab in test modal (test/setup/cleanup/pipeline/remote/profile)
     testExec?: string // Expanded execution row indices (comma-separated)
   }
   const page = Number(search.page) || 1

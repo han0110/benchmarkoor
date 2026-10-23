@@ -66,10 +66,10 @@ export async function fetchData<T>(path: string, opts?: { cacheBustInterval?: nu
   return { data, status: response.status }
 }
 
-// Fetches a gzip compressed JSON file. A server that applied Content-Encoding
+// Fetches a gzip compressed file. A server that applied Content-Encoding
 // has already inflated the body, so the gzip magic bytes decide whether to
 // inflate here.
-export async function fetchGzipJson<T>(path: string): Promise<FetchResult<T>> {
+export async function fetchGzipBytes(path: string): Promise<FetchResult<Uint8Array>> {
   const response = await fetchResponse(path)
 
   if (!response.ok) {
@@ -80,16 +80,22 @@ export async function fetchGzipJson<T>(path: string): Promise<FetchResult<T>> {
   const bytes = new Uint8Array(body)
   const isGzip = bytes[0] === 0x1f && bytes[1] === 0x8b
   const inflated = isGzip
-    ? await new Response(new Blob([body]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
-    : body
-  const text = new TextDecoder().decode(inflated)
+    ? new Uint8Array(await new Response(new Blob([body]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer())
+    : bytes
 
   // SPA servers may return 200 with HTML for missing files
-  if (/^\s*<(!doctype|html)/i.test(text)) {
+  if (/^\s*<(!doctype|html)/i.test(new TextDecoder().decode(inflated.subarray(0, 64)))) {
     return { data: null, status: 404 }
   }
 
-  return { data: JSON.parse(text), status: response.status }
+  return { data: inflated, status: response.status }
+}
+
+// Fetches a gzip compressed JSON file.
+export async function fetchGzipJson<T>(path: string): Promise<FetchResult<T>> {
+  const { data, status } = await fetchGzipBytes(path)
+
+  return { data: data && JSON.parse(new TextDecoder().decode(data)), status }
 }
 
 export interface HeadResult {

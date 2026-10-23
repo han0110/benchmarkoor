@@ -10,6 +10,7 @@ import { useRunResult } from '@/api/hooks/useRunResult'
 import { useSuite } from '@/api/hooks/useSuite'
 import { CrossLink } from '@/components/estimates/CrossLink'
 import { EstimateConfiguration } from '@/components/estimates/EstimateConfiguration'
+import { EstimateFilesPanel } from '@/components/estimates/EstimateFilesPanel'
 import { DimensionInsights } from '@/components/run-detail/DimensionInsights'
 import { EstimateDashboard } from '@/components/run-detail/estimate-dashboard'
 import { MetadataLabels } from '@/components/run-detail/MetadataLabels'
@@ -32,7 +33,7 @@ import { formatBytes } from '@/utils/format'
 export function EstimateDetailPage() {
   const { estimateId } = useParams({ from: '/estimates/$estimateId' })
   const navigate = useNavigate()
-  const { q = '', status = 'all', testModal, testStep, testExec } = useSearch({ from: '/estimates/$estimateId' }) as { q?: string; status?: TestStatusFilter; testModal?: string; testStep?: string; testExec?: string }
+  const { q = '', status = 'all', testModal, testStep, testExec, dlModal = false, dlFmt } = useSearch({ from: '/estimates/$estimateId' }) as { q?: string; status?: TestStatusFilter; testModal?: string; testStep?: string; testExec?: string; dlModal?: boolean; dlFmt?: string }
   const activeStepTab = TEST_MODAL_TABS.find((tab) => tab === testStep)
   const expandedExecRows = testExec ? new Set(testExec.split(',').map(Number).filter((n) => !isNaN(n))) : undefined
   const { data: estimate, isLoading, error, refetch } = useEstimate(estimateId)
@@ -73,6 +74,8 @@ export function EstimateDetailPage() {
   const handleTestModalChange = (testName: string | undefined) => updateSearch({ testModal: testName, testStep: undefined, testExec: undefined })
   const handleStepTabChange = (tab: TestModalTab) => updateSearch({ testStep: tab !== 'test' ? tab : undefined, testExec: undefined })
   const handleExpandedExecRowsChange = (rows: Set<number>) => updateSearch({ testExec: rows.size > 0 ? [...rows].sort((a, b) => a - b).join(',') : undefined })
+  const handleDownloadListModalChange = (open: boolean) => updateSearch({ dlModal: open || undefined })
+  const handleDownloadFormatChange = (format: string) => updateSearch({ dlFmt: format !== 'curl' ? format : undefined })
 
   if (isLoading) {
     return <LoadingState message="Loading estimate..." />
@@ -167,6 +170,14 @@ export function EstimateDetailPage() {
       <MetadataLabels labels={estimate.metadata.labels} />
 
       <EstimateConfiguration estimate={estimate} />
+
+      <EstimateFilesPanel
+        estimateId={estimateId}
+        showDownloadList={dlModal}
+        downloadFormat={(dlFmt as 'urls' | 'curl') ?? 'curl'}
+        onShowDownloadListChange={handleDownloadListModalChange}
+        onDownloadFormatChange={handleDownloadFormatChange}
+      />
 
       <div className="sticky top-0 z-30 -mx-4 flex items-center gap-4 border-b border-gray-200 bg-white/95 px-4 py-2 backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95">
         <FilterInput
