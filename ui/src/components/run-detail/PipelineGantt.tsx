@@ -15,7 +15,23 @@ const PLOT_RIGHT = 16
 const ROW_HIGHLIGHT = { light: 'rgba(0, 0, 0, 0.08)', dark: 'rgba(255, 255, 255, 0.12)' }
 
 const seconds = (value: number) => `${value.toFixed(3)} s`
+
+/** A duration under a second reads in milliseconds, so short sub steps keep their digits. */
+const duration = (value: number) => (value < 1 ? `${(value * 1000).toFixed(1)} ms` : seconds(value))
 const axisSeconds = (value: number) => `${+value.toFixed(3)} s`
+
+/** Ids, labels, and worker names come from the workers, so the tooltip escapes them. */
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => {
+    switch (c) {
+      case '&': return '&amp;'
+      case '<': return '&lt;'
+      case '>': return '&gt;'
+      case '"': return '&quot;'
+      default: return '&#39;'
+    }
+  })
+}
 
 const dot = (color: string) => `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span>`
 const cell = (text: string, pad: number) => `<td style="text-align:right;padding-left:${pad}px;white-space:nowrap">${text}</td>`
@@ -142,7 +158,8 @@ export function PipelineGantt({ items, endSec, breakdown, workerColors }: Pipeli
         appendToBody: true,
         position: (point: number[], _params: unknown, dom: HTMLElement, _rect: unknown, size: { viewSize: number[] }) => {
           const canvasTop = bandRef.current?.getBoundingClientRect().top ?? 0
-          const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), high)
+          // The low bound wins, so a box taller than the window keeps its top in view.
+          const clamp = (value: number, low: number, high: number) => Math.max(Math.min(value, high), low)
 
           return [
             clamp(point[0] + 16, 0, size.viewSize[0] - dom.offsetWidth),
@@ -151,16 +168,19 @@ export function PipelineGantt({ items, endSec, breakdown, workerColors }: Pipeli
         },
         formatter: (params: { value: [number, number] }) => {
           const [row, index] = params.value
-          const worker = (item: PipelineItem) => `${dot(workerColors[item.workerName])}${item.workerName} on ${item.nodeName}`
-          if (index < 0) return `<b>${rows[row].title}</b><br/>${worker(rows[row].items[0])}`
+          const worker = (item: PipelineItem) => `${dot(workerColors[item.workerName])}${escapeHtml(item.workerName)} on ${escapeHtml(item.nodeName)}`
+          if (index < 0) return `<b>${escapeHtml(rows[row].title)}</b><br/>${worker(rows[row].items[0])}`
           const { item } = bars[index]
           // The last row of the table is the Total, which needs no share.
           const table = breakdownRows(item, breakdown)
-            .map((line, index, all) => `<tr><td>${line.label}</td>${cell(seconds(line.seconds), 12)}${cell(index === all.length - 1 ? '' : `${Math.round(line.share * 100)}%`, 10)}</tr>`)
+            .map(
+              (line, index, all) =>
+                `<tr><td>${escapeHtml(line.label)}</td>${cell(duration(line.seconds), 12)}${cell(index === all.length - 1 ? '' : `${Math.round(line.share * 100)}%`, 10)}</tr>`,
+            )
             .join('')
 
           return (
-            `<b>${itemTitle(item)}</b><br/>${worker(item)}<br/>` +
+            `<b>${escapeHtml(itemTitle(item))}</b><br/>${worker(item)}<br/>` +
             `${seconds(item.startSec)} - ${seconds(item.endSec)} (${seconds(item.endSec - item.startSec)})` +
             (table === '' ? '' : `<table style="border-collapse:collapse;margin-top:3px">${table}</table>`)
           )

@@ -206,3 +206,84 @@ describe('breakdownRows', () => {
     expect(breakdownRows(item('Wrap - L1 0-63'), pipeline.breakdown)).toEqual([])
   })
 })
+
+// One ZisK 1.4 proof whose spans nest, with the time no span covers as
+// Unattributed segments, and one row whose segments do not match the shape.
+const spans: TestPipeline = {
+  ...instances,
+  breakdown: ['Network Transport', 'Unattributed', 'GEN_PROOF', 'STARK_COMMIT_STAGE_1', 'NTT'],
+  tasks: [
+    [
+      0,
+      0,
+      'Main #137',
+      1000,
+      10,
+      [],
+      [
+        [3, 1001000, 3000, 1],
+        [2, 1000500, 7500, 0],
+        [4, 1001200, 150, 2],
+        [4, 1003000, 50, 2],
+        [1, 1000000, 500, 0],
+        [1, 1008000, 2000, 0],
+      ],
+    ],
+    [1, 0, 'Main #137', 1010, 2, [], [[1, 1010000]]] as unknown as TestPipeline['tasks'][number],
+  ],
+}
+
+describe('segments', () => {
+  const [segmented, ...rest] = decodePipeline(spans).items
+
+  it('drops a row whose segments do not match the shape and flattens the segments to the deepest span over each piece', () => {
+    expect(rest).toEqual([])
+    expect(segmented.segments.map((segment) => segment.index)).toEqual([1, 2, 3, 4, 3, 4, 3, 2, 1])
+    expect(segmented.segments[1].startSec).toBeCloseTo(1.0005)
+    expect(segmented.segments[1].endSec).toBeCloseTo(1.001)
+    expect(segmented.segments[7].startSec).toBeCloseTo(1.004)
+    expect(segmented.segments[7].endSec).toBeCloseTo(1.008)
+  })
+
+  it('sums the self time per label, longest first, Unattributed last, and closes on the bar', () => {
+    const rows = breakdownRows(segmented, spans.breakdown)
+
+    expect(rows.map((row) => row.label)).toEqual(['GEN_PROOF', 'STARK_COMMIT_STAGE_1', 'NTT', 'Unattributed', 'Total'])
+    expect(rows.map((row) => row.seconds)).toEqual([0.0045, 0.0028, 0.0002, 0.0025, 0.01].map((seconds) => expect.closeTo(seconds)))
+    expect(rows.slice(0, -1).reduce((sum, row) => sum + row.seconds, 0)).toBeCloseTo(rows[rows.length - 1].seconds)
+  })
+})
+
+// Two labels under one percent of the bar sum into one Other line, a single one
+// keeps its name, and a span past the bar clips to it. A row of a negative
+// duration, a label past the table, or a segment of a negative duration drops.
+const minor: TestPipeline = {
+  ...instances,
+  breakdown: ['Unattributed', 'A', 'B', 'C', 'D'],
+  tasks: [
+    [0, 0, 'Main #1', 0, 1000, [], [[1, 0, 900000, 0], [4, 900000, 1100000, 0], [2, 980000, 5000, 0], [3, 985000, 5000, 0], [0, 990000, 10000, 0]]],
+    [0, 0, 'Main #2', 2000, 1000, [], [[1, 2000000, 995000, 0], [2, 2995000, 5000, 0]]],
+    [0, 0, 'Main #3', 0, -5, []],
+    [0, 0, 'Main #4', 0, 5, [[9, 1]]],
+    [0, 0, 'Main #5', 0, 5, [], [[1, 0, -1, 0]]],
+  ],
+}
+
+describe('minor segments', () => {
+  const items = decodePipeline(minor).items
+
+  it('drops the rows that do not match the shape', () => {
+    expect(items.map((item) => item.id)).toEqual(['Main #1', 'Main #2'])
+  })
+
+  it('sums two labels under the floor into Other before Unattributed and clips a span to its bar', () => {
+    const rows = breakdownRows(items[0], minor.breakdown)
+
+    expect(rows.map((row) => row.label)).toEqual(['A', 'D', 'Other (2)', 'Unattributed', 'Total'])
+    expect(rows.map((row) => row.seconds)).toEqual([0.9, expect.closeTo(0.08), expect.closeTo(0.01), expect.closeTo(0.01), 1])
+  })
+
+  it('keeps the name of a single label under the floor', () => {
+    expect(breakdownRows(items[1], minor.breakdown).map((row) => row.label)).toEqual(['A', 'B', 'Total'])
+  })
+})

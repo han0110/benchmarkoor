@@ -42,6 +42,21 @@ export function kindShade(phase: PipelinePhase, index: number): string {
   return `hsl(${Math.round((((turn % 6) + 6) % 6) * 60)}, ${Math.round((span / (1 - Math.abs(2 * lightness - 1))) * 100) + spread}%, ${Math.round(lightness * 100) + step}%)`
 }
 
+/** Label of the segments that cover the time of a task no span covers. */
+export const UNATTRIBUTED_LABEL = 'Unattributed'
+
+/** One piece of a task, named by the breakdown label of the deepest span over it. */
+export interface PipelineSegment {
+  index: number
+  startSec: number
+  endSec: number
+}
+
+/** One timed span of the wire, a breakdown label at a nesting depth. */
+interface PipelineSpan extends PipelineSegment {
+  depth: number
+}
+
 /** One legend entry, the kinds the artifact draws under it and the shade their bars carry. */
 export interface PipelineKindShade {
   label: string
@@ -66,6 +81,8 @@ export interface PipelineItem {
   breakdown: Array<[number, number]>
   /** Every breakdown index a task of the kind reports, so the hover table of the kind holds still. */
   sections: number[]
+  /** Pieces of the task in start order, empty when the task reports no span. */
+  segments: PipelineSegment[]
 }
 
 /** One drawn line of the chart, the items painted on it in start order. */
@@ -94,11 +111,14 @@ export interface BreakdownRow {
 const isPair = (value: unknown): value is [number, number] =>
   Array.isArray(value) && value.length === 2 && value.every((cell) => typeof cell === 'number' && Number.isFinite(cell))
 
+const isQuad = (value: unknown): value is [number, number, number, number] =>
+  Array.isArray(value) && value.length === 4 && value.every((cell) => typeof cell === 'number' && Number.isFinite(cell))
+
 const isIndex = (value: unknown, limit: number) => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < limit
 
-function validTask(row: PipelineTaskRow, kinds: number, workers: number): boolean {
-  if (!Array.isArray(row) || row.length !== 6) return false
-  const [kind, worker, id, startMs, durationMs, breakdown] = row
+function validTask(row: PipelineTaskRow, kinds: number, workers: number, labels: number): boolean {
+  if (!Array.isArray(row) || (row.length !== 6 && row.length !== 7)) return false
+  const [kind, worker, id, startMs, durationMs, breakdown, segments = []] = row
 
   return (
     isIndex(kind, kinds) &&
@@ -106,9 +126,33 @@ function validTask(row: PipelineTaskRow, kinds: number, workers: number): boolea
     typeof id === 'string' &&
     Number.isFinite(startMs) &&
     Number.isFinite(durationMs) &&
+    durationMs >= 0 &&
     Array.isArray(breakdown) &&
-    breakdown.every(isPair)
+    breakdown.every((section) => isPair(section) && isIndex(section[0], labels) && section[1] >= 0) &&
+    Array.isArray(segments) &&
+    segments.every((segment) => isQuad(segment) && isIndex(segment[0], labels) && segment[2] >= 0 && isIndex(segment[3], Infinity))
   )
+}
+
+/**
+ * flattenSpans cuts the spans of a task at every span edge and names each piece
+ * by the deepest span over it, the latest to start on a tie, so the pieces never
+ * overlap and every label holds its self time. Adjacent pieces of one label join.
+ */
+function flattenSpans(spans: PipelineSpan[]): PipelineSegment[] {
+  const edges = [...new Set(spans.flatMap((span) => [span.startSec, span.endSec]))].sort((a, b) => a - b)
+  const pieces: PipelineSegment[] = []
+  for (let at = 1; at < edges.length; at++) {
+    const [startSec, endSec] = [edges[at - 1], edges[at]]
+    const over = spans.filter((span) => span.startSec <= startSec && span.endSec >= endSec)
+    if (over.length === 0) continue
+    const { index } = over.reduce((deepest, span) => (span.depth > deepest.depth || (span.depth === deepest.depth && span.startSec > deepest.startSec) ? span : deepest))
+    const last = pieces[pieces.length - 1]
+    if (last?.index === index && last.endSec === startSec) last.endSec = endSec
+    else pieces.push({ index, startSec, endSec })
+  }
+
+  return pieces
 }
 
 /**
@@ -131,11 +175,11 @@ export function decodePipeline(pipeline: TestPipeline): PipelineModel {
 
     return kindShade(kind.phase, legends.indexOf(kindLegends[index]))
   })
-  const rows = pipeline.tasks.filter((row) => validTask(row, kinds.length, workers.length))
+  const rows = pipeline.tasks.filter((row) => validTask(row, kinds.length, workers.length, pipeline.breakdown.length))
   const sections = kinds.map((_, kind) =>
     [...new Set(rows.filter((row) => row[0] === kind).flatMap((row) => row[5].map(([index]) => index)))].sort((a, b) => a - b),
   )
-  const items = rows.map(([kind, worker, id, startMs, durationMs, breakdown]) => ({
+  const items = rows.map(([kind, worker, id, startMs, durationMs, breakdown, segments = []]) => ({
     kind,
     label: kinds[kind].label,
     color: colors[kind],
@@ -148,6 +192,16 @@ export function decodePipeline(pipeline: TestPipeline): PipelineModel {
     endSec: (startMs + durationMs) / 1000,
     breakdown,
     sections: sections[kind],
+    segments: flattenSpans(
+      segments
+        .map(([index, startUs, durationUs, depth]) => ({
+          index,
+          startSec: Math.max(startUs / 1e6, startMs / 1000),
+          endSec: Math.min((startUs + durationUs) / 1e6, (startMs + durationMs) / 1000),
+          depth,
+        }))
+        .filter((span) => span.startSec < span.endSec),
+    ),
   }))
   const legendsUsed = new Map<string, string>()
   ;[...new Set(items.map((item) => item.kind))]
@@ -197,6 +251,12 @@ export function packRows(items: PipelineItem[]): PipelineRow[] {
 /** Share of the bar the unattributed remainder needs before it earns a row. */
 const UNATTRIBUTED_FLOOR = 0.01
 
+/** Share of the bar a segment label needs before it earns a row of its own. */
+const SEGMENT_FLOOR = 0.01
+
+/** Label of the row that sums the segment labels under the floor. */
+const OTHER_LABEL = 'Other'
+
 /**
  * breakdownRows lists the sub steps of a task with their share of its bar. The
  * table names every section its kind reports anywhere in the artifact, at zero
@@ -204,20 +264,40 @@ const UNATTRIBUTED_FLOOR = 0.01
  * Total row is the bar, so the table closes on the window of the task. Sub
  * steps that fall short of the bar leave an unattributed remainder the table
  * names once it reaches the floor, and sub steps that overrun the bar read
- * past one.
+ * past one. A task with segments sums them per label after its sections,
+ * longest first, and its segments name the Unattributed time themselves on the
+ * last line before the Total, so they close on the bar. Two or more labels
+ * under the floor sum into one Other line before the Unattributed line.
  */
 export function breakdownRows(item: PipelineItem, labels: string[]): BreakdownRow[] {
-  if (item.sections.length === 0) return []
+  if (item.sections.length === 0 && item.segments.length === 0) return []
   const duration = item.endSec - item.startSec
   const sum = item.breakdown.reduce((added, [, ms]) => added + ms / 1000, 0)
   const share = (seconds: number) => (duration > 0 ? seconds / duration : 0)
+  const label = (index: number) => labels[index] ?? `#${index}`
   const measured = new Map(item.breakdown)
   const rows = item.sections.map((index) => {
     const seconds = (measured.get(index) ?? 0) / 1000
 
-    return { label: labels[index] ?? `#${index}`, seconds, share: share(seconds) }
+    return { label: label(index), seconds, share: share(seconds) }
   })
-  if (share(duration - sum) >= UNATTRIBUTED_FLOOR) rows.push({ label: 'Unattributed', seconds: duration - sum, share: share(duration - sum) })
+  if (item.segments.length > 0) {
+    const selfSeconds = new Map<number, number>()
+    item.segments.forEach(({ index, startSec, endSec }) => selfSeconds.set(index, (selfSeconds.get(index) ?? 0) + endSec - startSec))
+    const isUnattributed = (index: number) => labels[index] === UNATTRIBUTED_LABEL
+    const named = [...selfSeconds].filter(([index]) => !isUnattributed(index)).sort(([, a], [, b]) => b - a)
+    const minor = named.filter(([, seconds]) => share(seconds) < SEGMENT_FLOOR)
+    const shown = minor.length > 1 ? named.filter(([, seconds]) => share(seconds) >= SEGMENT_FLOOR) : named
+    rows.push(...shown.map(([index, seconds]) => ({ label: label(index), seconds, share: share(seconds) })))
+    if (minor.length > 1) {
+      const seconds = minor.reduce((added, [, minorSeconds]) => added + minorSeconds, 0)
+      rows.push({ label: `${OTHER_LABEL} (${minor.length})`, seconds, share: share(seconds) })
+    }
+    const unattributed = [...selfSeconds].find(([index]) => isUnattributed(index))
+    if (unattributed) rows.push({ label: UNATTRIBUTED_LABEL, seconds: unattributed[1], share: share(unattributed[1]) })
+  } else if (share(duration - sum) >= UNATTRIBUTED_FLOOR) {
+    rows.push({ label: UNATTRIBUTED_LABEL, seconds: duration - sum, share: share(duration - sum) })
+  }
 
   return [...rows, { label: 'Total', seconds: duration, share: 1 }]
 }

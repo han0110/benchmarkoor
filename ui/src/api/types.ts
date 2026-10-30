@@ -771,8 +771,12 @@ export interface PipelineWorker {
   node: string
 }
 
-/** [kind, worker, id, startMs, durationMs, breakdown pairs of [index, ms]] */
-export type PipelineTaskRow = [number, number, string, number, number, Array<[number, number]>]
+/**
+ * [kind, worker, id, startMs, durationMs, breakdown pairs of [index, ms]], then
+ * on a task that carries spans its segments of [index, startUs, durationUs,
+ * depth] with the start in microseconds from the proof start.
+ */
+export type PipelineTaskRow = [number, number, string, number, number, Array<[number, number]>, Array<[number, number, number, number]>?]
 
 export interface TestPipeline {
   schemaVersion: number
