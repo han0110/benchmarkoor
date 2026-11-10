@@ -77,8 +77,8 @@ runner:
       extra_args:
         - --zkvm=zisk
         - --stateless-validator=reth
-        - --elf=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-zisk-v1.3.1-alpha.elf
-        - --vk=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-reth-zisk-v1.3.1-alpha.vk
+        - --elf=https://raw.githubusercontent.com/han0110/provoor/24e79f54341638e629b1d1df05b5dcc8576e7ac2/elfs/stateless-validator-reth-zisk-v1.3.1-alpha.elf
+        - --vk=https://raw.githubusercontent.com/han0110/provoor/24e79f54341638e629b1d1df05b5dcc8576e7ac2/elfs/stateless-validator-reth-zisk-v1.3.1-alpha.vk
         - --coordinator-endpoint=http://${COORDINATOR_IP}:7000
     - id: ethrex-zisk
       client: provoor
@@ -92,8 +92,8 @@ runner:
       extra_args:
         - --zkvm=zisk
         - --stateless-validator=ethrex
-        - --elf=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-ethrex-zisk-v1.3.1-alpha.elf
-        - --vk=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-ethrex-zisk-v1.3.1-alpha.vk
+        - --elf=https://raw.githubusercontent.com/han0110/provoor/24e79f54341638e629b1d1df05b5dcc8576e7ac2/elfs/stateless-validator-ethrex-zisk-v1.3.1-alpha.elf
+        - --vk=https://raw.githubusercontent.com/han0110/provoor/24e79f54341638e629b1d1df05b5dcc8576e7ac2/elfs/stateless-validator-ethrex-zisk-v1.3.1-alpha.vk
         - --coordinator-endpoint=http://${COORDINATOR_IP}:7000
     - id: nimbus-zisk
       client: provoor
@@ -107,6 +107,6 @@ runner:
       extra_args:
         - --zkvm=zisk
         - --stateless-validator=nimbus
-        - --elf=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-nimbus-zisk-v1.3.1-alpha.elf
-        - --vk=https://raw.githubusercontent.com/han0110/provoor/refs/heads/main/elfs/stateless-validator-nimbus-zisk-v1.3.1-alpha.vk
+        - --elf=https://raw.githubusercontent.com/han0110/provoor/24e79f54341638e629b1d1df05b5dcc8576e7ac2/elfs/stateless-validator-nimbus-zisk-v1.3.1-alpha.elf
+        - --vk=https://raw.githubusercontent.com/han0110/provoor/24e79f54341638e629b1d1df05b5dcc8576e7ac2/elfs/stateless-validator-nimbus-zisk-v1.3.1-alpha.vk
         - --coordinator-endpoint=http://${COORDINATOR_IP}:7000
